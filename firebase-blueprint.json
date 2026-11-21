@@ -1,0 +1,134 @@
+{
+  "entities": {
+    "TaskList": {
+      "title": "TaskList",
+      "description": "A user-owned project or category list used to organize tasks and color-code calendar items.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner Firebase Auth UID matching the parent /users/{userId} path."
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name of the list (1 to 60 characters)."
+        },
+        "colorHex": {
+          "type": "string",
+          "description": "Hex color string (#RRGGBB) used for project category color coding."
+        },
+        "iconKey": {
+          "type": "string",
+          "description": "Identifier of the Material icon associated with this list.",
+          "enum": [
+            "personal",
+            "work",
+            "home",
+            "wellness",
+            "errands",
+            "study",
+            "finance",
+            "creative",
+            "travel",
+            "star"
+          ]
+        },
+        "sortOrder": {
+          "type": "integer",
+          "description": "Display ordering index (0 to 10000)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp written with FieldValue.serverTimestamp() at creation."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp written with FieldValue.serverTimestamp() on every mutation."
+        }
+      },
+      "required": [
+        "userId",
+        "name",
+        "colorHex",
+        "iconKey",
+        "sortOrder",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "TaskItem": {
+      "title": "TaskItem",
+      "description": "A personal to-do task assigned to a list, with a due date and optional push reminder timestamp.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner Firebase Auth UID matching the parent /users/{userId} path."
+        },
+        "listId": {
+          "type": "string",
+          "description": "Document ID of the parent TaskList under /users/{userId}/lists/{listId}."
+        },
+        "title": {
+          "type": "string",
+          "description": "Task title (1 to 200 characters)."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Optional additional notes for the task (0 to 1000 characters)."
+        },
+        "dueDateEpochDay": {
+          "type": "integer",
+          "description": "Local due date stored as LocalDate.toEpochDay() for timezone-stable grouping and calendar display."
+        },
+        "reminderEpochMillis": {
+          "type": "integer",
+          "description": "Optional UTC epoch milliseconds when the local reminder notification should trigger."
+        },
+        "completed": {
+          "type": "boolean",
+          "description": "Whether the task is completed."
+        },
+        "completedAtEpochMillis": {
+          "type": "integer",
+          "description": "Optional UTC epoch milliseconds when the task was marked completed."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp written with FieldValue.serverTimestamp() at creation."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp written with FieldValue.serverTimestamp() on every mutation."
+        }
+      },
+      "required": [
+        "userId",
+        "listId",
+        "title",
+        "dueDateEpochDay",
+        "completed",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/lists/{listId}": {
+      "schema": {
+        "$ref": "#/entities/TaskList"
+      },
+      "description": "User-scoped collection of custom color-coded task lists."
+    },
+    "/users/{userId}/tasks/{taskId}": {
+      "schema": {
+        "$ref": "#/entities/TaskItem"
+      },
+      "description": "User-scoped collection of all personal tasks across all lists."
+    }
+  }
+}

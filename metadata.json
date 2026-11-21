@@ -1,0 +1,6 @@
+{
+  "name": "Dayloom",
+  "description": "Personal daily task manager with multiple color-coded lists, a unified due-date timeline, color-coded calendar view, reminder notifications, and cloud sync.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

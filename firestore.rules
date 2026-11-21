@@ -1,0 +1,142 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Shared hardened primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidIconKey(key) {
+      return key is string && key in [
+        'personal',
+        'work',
+        'home',
+        'wellness',
+        'errands',
+        'study',
+        'finance',
+        'creative',
+        'travel',
+        'star'
+      ];
+    }
+
+    function isValidTaskList(data, userId) {
+      return data.userId is string &&
+             data.userId == userId &&
+             data.userId == request.auth.uid &&
+             data.name is string &&
+             data.name.size() >= 1 &&
+             data.name.size() <= 60 &&
+             data.colorHex is string &&
+             data.colorHex.size() == 7 &&
+             data.colorHex.matches('^#[0-9A-Fa-f]{6}$') &&
+             isValidIconKey(data.iconKey) &&
+             data.sortOrder is int &&
+             data.sortOrder >= 0 &&
+             data.sortOrder <= 10000 &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time &&
+             data.updatedAt is timestamp &&
+             data.updatedAt <= request.time;
+    }
+
+    function isValidTaskItem(data, userId) {
+      return data.userId is string &&
+             data.userId == userId &&
+             data.userId == request.auth.uid &&
+             isValidId(data.listId) &&
+             data.title is string &&
+             data.title.size() >= 1 &&
+             data.title.size() <= 200 &&
+             (!('notes' in data) || data.notes == null || (data.notes is string && data.notes.size() <= 1000)) &&
+             data.dueDateEpochDay is int &&
+             data.dueDateEpochDay >= -365000 &&
+             data.dueDateEpochDay <= 365000 &&
+             (!('reminderEpochMillis' in data) || data.reminderEpochMillis == null || (data.reminderEpochMillis is int && data.reminderEpochMillis >= 0)) &&
+             data.completed is bool &&
+             (!('completedAtEpochMillis' in data) || data.completedAtEpochMillis == null || (data.completedAtEpochMillis is int && data.completedAtEpochMillis >= 0)) &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time &&
+             data.updatedAt is timestamp &&
+             data.updatedAt <= request.time;
+    }
+
+    // User-scoped task lists
+    match /users/{userId}/lists/{listId} {
+      allow get: if isOwner(userId) && isValidId(userId) && isValidId(listId);
+      allow list: if isOwner(userId);
+
+      allow create: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       isValidId(listId) &&
+                       incoming().keys().hasAll(['userId', 'name', 'colorHex', 'iconKey', 'sortOrder', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'name', 'colorHex', 'iconKey', 'sortOrder', 'createdAt', 'updatedAt']) &&
+                       isValidTaskList(incoming(), userId);
+
+      allow update: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       isValidId(listId) &&
+                       isValidTaskList(incoming(), userId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['name', 'colorHex', 'iconKey', 'sortOrder', 'updatedAt']);
+
+      allow delete: if isOwner(userId) && isValidId(userId) && isValidId(listId);
+    }
+
+    // User-scoped tasks
+    match /users/{userId}/tasks/{taskId} {
+      allow get: if isOwner(userId) && isValidId(userId) && isValidId(taskId);
+      allow list: if isOwner(userId);
+
+      allow create: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       isValidId(taskId) &&
+                       incoming().keys().hasAll(['userId', 'listId', 'title', 'dueDateEpochDay', 'completed', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'listId', 'title', 'notes', 'dueDateEpochDay', 'reminderEpochMillis', 'completed', 'completedAtEpochMillis', 'createdAt', 'updatedAt']) &&
+                       isValidTaskItem(incoming(), userId) &&
+                       exists(/databases/$(database)/documents/users/$(userId)/lists/$(incoming().listId));
+
+      allow update: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       isValidId(taskId) &&
+                       isValidTaskItem(incoming(), userId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       (
+                         // Action 1: Toggle completion status
+                         incoming().diff(existing()).affectedKeys().hasOnly(['completed', 'completedAtEpochMillis', 'updatedAt']) ||
+                         // Action 2: Edit task details or move to another owned list
+                         (
+                           incoming().diff(existing()).affectedKeys().hasOnly(['title', 'notes', 'listId', 'dueDateEpochDay', 'reminderEpochMillis', 'completed', 'completedAtEpochMillis', 'updatedAt']) &&
+                           (incoming().listId == existing().listId || exists(/databases/$(database)/documents/users/$(userId)/lists/$(incoming().listId)))
+                         )
+                       );
+
+      allow delete: if isOwner(userId) && isValidId(userId) && isValidId(taskId);
+    }
+  }
+}

@@ -1,0 +1,22 @@
+<resources>
+    <string name="app_name">Dayloom</string>
+    <string name="nav_timeline">Timeline</string>
+    <string name="nav_calendar">Calendar</string>
+    <string name="nav_lists">Lists</string>
+    <string name="action_new_task">New Task</string>
+    <string name="action_new_list">New List</string>
+    <string name="action_save">Save</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_delete">Delete</string>
+    <string name="section_overdue">Overdue</string>
+    <string name="section_two_weeks_to_two_months">Later · 2 Weeks to 2 Months</string>
+    <string name="section_after_two_months">After 2 Months</string>
+    <string name="all_lists_filter">All Lists</string>
+    <string name="notification_channel_name">Task Reminders</string>
+    <string name="notification_channel_description">Scheduled reminder alerts for your personal to-do tasks.</string>
+    <string name="notification_permission_denied">Notifications are disabled. Enable them in system settings to receive task reminders.</string>
+    <string name="empty_timeline_title">A clear horizon</string>
+    <string name="empty_timeline_subtitle">Add your first task to see your upcoming two-week timeline and color-coded calendar come alive.</string>
+    <string name="empty_lists_title">Organize your world</string>
+    <string name="empty_lists_subtitle">Create personal, work, or home lists with custom colors to visually group your calendar and timeline.</string>
+</resources>
