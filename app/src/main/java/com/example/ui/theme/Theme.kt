@@ -9,89 +9,92 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.dp
 
-private val LightColorScheme = lightColorScheme(
-    primary = PinePrimary,
-    onPrimary = PineOnPrimary,
-    primaryContainer = PinePrimaryContainer,
-    onPrimaryContainer = PineOnPrimaryContainer,
-    secondary = TerracottaSecondary,
-    onSecondary = TerracottaOnSecondary,
-    secondaryContainer = TerracottaSecondaryContainer,
-    onSecondaryContainer = TerracottaOnSecondaryContainer,
-    tertiary = HoneyTertiary,
-    onTertiary = HoneyOnTertiary,
-    tertiaryContainer = HoneyTertiaryContainer,
-    onTertiaryContainer = HoneyOnTertiaryContainer,
-    background = LinenBackground,
-    onBackground = InkOnBackground,
-    surface = LinenSurface,
-    onSurface = InkOnSurface,
-    surfaceVariant = ParchmentSurfaceVariant,
-    onSurfaceVariant = SlateOnSurfaceVariant,
-    surfaceContainerLowest = SurfaceContainerLowestLight,
-    surfaceContainerLow = SurfaceContainerLowLight,
-    surfaceContainer = SurfaceContainerLight,
-    surfaceContainerHigh = SurfaceContainerHighLight,
-    surfaceContainerHighest = SurfaceContainerHighestLight,
-    outline = WarmOutline,
-    outlineVariant = SoftOutlineVariant,
-    error = ErrorClay,
-    onError = OnErrorLight,
-    errorContainer = ErrorContainerLight,
-    onErrorContainer = OnErrorContainerLight,
+private val DaybookLightColorScheme = lightColorScheme(
+    primary = ForestSage,
+    onPrimary = OnForestSage,
+    primaryContainer = ForestSageContainer,
+    onPrimaryContainer = OnForestSageContainer,
+    secondary = Terracotta,
+    onSecondary = OnTerracotta,
+    secondaryContainer = TerracottaContainer,
+    onSecondaryContainer = OnTerracottaContainer,
+    tertiary = AntiquedBrass,
+    onTertiary = OnAntiquedBrass,
+    tertiaryContainer = AntiquedBrassContainer,
+    onTertiaryContainer = OnAntiquedBrassContainer,
+    background = WarmParchment,
+    onBackground = WarmInk,
+    surface = WarmParchment,
+    onSurface = WarmInk,
+    surfaceVariant = LinenCard,
+    onSurfaceVariant = MutedStone,
+    surfaceContainerLowest = OnForestSage,
+    surfaceContainerLow = LinenCard,
+    surfaceContainer = LinenContainer,
+    surfaceContainerHigh = LinenContainerHigh,
+    outline = ParchmentOutline,
+    outlineVariant = ParchmentOutlineVariant,
+    error = CrimsonInk,
+    onError = OnCrimsonInk,
+    errorContainer = CrimsonContainer,
+    onErrorContainer = OnCrimsonContainer
 )
 
-private val DarkColorScheme = darkColorScheme(
-    primary = PinePrimaryDark,
-    onPrimary = PineOnPrimaryDark,
-    primaryContainer = PinePrimaryContainerDark,
-    onPrimaryContainer = PineOnPrimaryContainerDark,
-    secondary = TerracottaSecondaryDark,
-    onSecondary = TerracottaOnSecondaryDark,
-    secondaryContainer = TerracottaSecondaryContainerDark,
-    onSecondaryContainer = TerracottaOnSecondaryContainerDark,
-    tertiary = HoneyTertiaryDark,
-    onTertiary = HoneyOnTertiaryDark,
-    tertiaryContainer = HoneyTertiaryContainerDark,
-    onTertiaryContainer = HoneyOnTertiaryContainerDark,
-    background = ForestBackgroundDark,
-    onBackground = CreamOnBackgroundDark,
-    surface = ForestSurfaceDark,
-    onSurface = CreamOnSurfaceDark,
-    surfaceVariant = ForestSurfaceVariantDark,
-    onSurfaceVariant = SageMutedOnSurfaceDark,
-    surfaceContainerLowest = SurfaceContainerLowestDark,
-    surfaceContainerLow = SurfaceContainerLowDark,
-    surfaceContainer = SurfaceContainerDark,
-    surfaceContainerHigh = SurfaceContainerHighDark,
-    surfaceContainerHighest = SurfaceContainerHighestDark,
-    outline = OutlineDark,
-    outlineVariant = OutlineVariantDark,
-    error = ErrorClayDark,
-    onError = OnErrorDark,
-    errorContainer = ErrorContainerDark,
-    onErrorContainer = OnErrorContainerDark,
+private val ColorErrorDark = androidx.compose.ui.graphics.Color(0xFFF2B8B5)
+private val ColorOnErrorDark = androidx.compose.ui.graphics.Color(0xFF601410)
+private val ColorErrorContainerDark = androidx.compose.ui.graphics.Color(0xFF8C1D18)
+private val ColorOnErrorContainerDark = androidx.compose.ui.graphics.Color(0xFFF9DEDC)
+
+private val DaybookDarkColorScheme = darkColorScheme(
+    primary = SageMist,
+    onPrimary = OnSageMist,
+    primaryContainer = DeepSageContainer,
+    onPrimaryContainer = OnDeepSageContainer,
+    secondary = WarmClay,
+    onSecondary = OnWarmClay,
+    secondaryContainer = DeepClayContainer,
+    onSecondaryContainer = OnDeepClayContainer,
+    tertiary = SoftGold,
+    onTertiary = OnSoftGold,
+    tertiaryContainer = DeepGoldContainer,
+    onTertiaryContainer = OnDeepGoldContainer,
+    background = EspressoCanvas,
+    onBackground = WarmCreamText,
+    surface = EspressoCanvas,
+    onSurface = WarmCreamText,
+    surfaceVariant = EspressoSurfaceLow,
+    onSurfaceVariant = MutedSandText,
+    surfaceContainerLowest = EspressoCanvas,
+    surfaceContainerLow = EspressoSurfaceLow,
+    surfaceContainer = EspressoSurface,
+    surfaceContainerHigh = EspressoSurfaceHigh,
+    outline = EspressoOutline,
+    outlineVariant = EspressoOutlineVariant,
+    error = ColorErrorDark,
+    onError = ColorOnErrorDark,
+    errorContainer = ColorErrorContainerDark,
+    onErrorContainer = ColorOnErrorContainerDark
 )
 
-val DayloomShapes = Shapes(
-    extraSmall = RoundedCornerShape(8.dp),
-    small = RoundedCornerShape(12.dp),
-    medium = RoundedCornerShape(18.dp),
+val DaybookShapes = Shapes(
+    extraSmall = RoundedCornerShape(6.dp),
+    small = RoundedCornerShape(10.dp),
+    medium = RoundedCornerShape(16.dp),
     large = RoundedCornerShape(24.dp),
-    extraLarge = RoundedCornerShape(30.dp),
+    extraLarge = RoundedCornerShape(32.dp)
 )
 
 @Composable
-fun DayloomTheme(
+fun DaybookTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit
 ) {
-    val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
+    val colorScheme = if (darkTheme) DaybookDarkColorScheme else DaybookLightColorScheme
 
     MaterialTheme(
         colorScheme = colorScheme,
-        typography = Typography,
-        shapes = DayloomShapes,
+        typography = DaybookTypography,
+        shapes = DaybookShapes,
         content = content
     )
 }

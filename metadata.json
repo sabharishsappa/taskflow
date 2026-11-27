@@ -1,6 +1,6 @@
 {
-  "name": "Dayloom",
-  "description": "Personal daily task manager with multiple color-coded lists, a unified due-date timeline, color-coded calendar view, reminder notifications, and cloud sync.",
+  "name": "Daybook",
+  "description": "A calm, private personal journal for daily reflections, moods, and moments stored locally on your device.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -3,17 +3,19 @@ package com.example.ui
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.SubTask
+import com.example.data.TaskConstraints
+import com.example.data.TaskItem
+import com.example.data.TaskPriority
+import com.example.data.TaskRecurrence
 import com.example.data.TaskRepository
-import com.example.model.DayDate
-import com.example.model.ListIconOption
-import com.example.model.ProjectColorPalette
-import com.example.model.TaskItem
-import com.example.model.TaskList
-import com.example.notifications.ReminderScheduler
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
@@ -22,444 +24,296 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-sealed interface DataState<out T> {
-    data object Loading : DataState<Nothing>
-    data class Success<T>(val data: T) : DataState<T>
-    data class Error(val message: String) : DataState<Nothing>
+enum class TaskViewFilter(val label: String) {
+    ALL("Active"),
+    TODAY("Today"),
+    UPCOMING("Upcoming"),
+    OVERDUE("Overdue"),
+    COMPLETED("Completed")
 }
 
-enum class MainDestination {
-    TIMELINE,
-    CALENDAR,
-    LISTS,
+enum class TaskSortOption(val label: String) {
+    SMART("Smart"),
+    PRIORITY("Priority"),
+    DUE_DATE("Due Date"),
+    NEWEST("Newest")
 }
 
-data class TaskEditorDraft(
-    val existingTask: TaskItem? = null,
-    val prefillDate: DayDate = DayDate.today(),
-    val prefillListId: String? = null,
-)
+data class TaskFilterState(
+    val viewFilter: TaskViewFilter = TaskViewFilter.ALL,
+    val query: String = "",
+    val selectedCategory: String? = null,
+    val selectedPriority: TaskPriority? = null,
+    val sortOption: TaskSortOption = TaskSortOption.SMART
+) {
+    val hasExtraFilters: Boolean
+        get() = query.isNotBlank() || selectedCategory != null || selectedPriority != null
+}
 
-data class ListEditorDraft(
-    val existingList: TaskList? = null,
-)
-
-data class DayloomUiControls(
-    val currentTab: MainDestination = MainDestination.TIMELINE,
-    val timelineListFilterId: String? = null,
-    val showCompletedInTimeline: Boolean = false,
-    val calendarSelectedDate: DayDate = DayDate.today(),
-    val calendarDisplayedMonth: DayDate = DayDate.today().firstOfMonth(),
-    val calendarListFilterId: String? = null,
-    val selectedListDetailId: String? = null,
-    val taskEditorDraft: TaskEditorDraft? = null,
-    val listEditorDraft: ListEditorDraft? = null,
-    val snackbarMessage: String? = null,
-    val isMutating: Boolean = false,
+data class TaskSummaryStats(
+    val activeCount: Int = 0,
+    val overdueCount: Int = 0,
+    val todayTotalCount: Int = 0,
+    val todayCompletedCount: Int = 0,
+    val completedCount: Int = 0
 )
 
 class TaskViewModel(
-    private val repository: TaskRepository,
-    private val reminderScheduler: ReminderScheduler,
+    private val repository: TaskRepository
 ) : ViewModel() {
 
-    private val _controls = MutableStateFlow(DayloomUiControls())
-    val controls: StateFlow<DayloomUiControls> = _controls.asStateFlow()
+    private val _filterState = MutableStateFlow(TaskFilterState())
+    val filterState: StateFlow<TaskFilterState> = _filterState.asStateFlow()
 
-    val listsState: StateFlow<DataState<List<TaskList>>> = repository.observeLists()
-        .map<List<TaskList>, DataState<List<TaskList>>> { DataState.Success(it) }
-        .catch { error ->
-            if (error is CancellationException) throw error
-            Log.w(TAG, "Error observing lists", error)
-            emit(DataState.Error(error.message ?: "Unable to load your lists."))
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
-            initialValue = DataState.Loading,
-        )
+    private val _events = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    val events: SharedFlow<String> = _events.asSharedFlow()
 
-    val tasksState: StateFlow<DataState<List<TaskItem>>> = repository.observeTasks()
-        .map<List<TaskItem>, DataState<List<TaskItem>>> { DataState.Success(it) }
+    val allTasks: StateFlow<List<TaskItem>> = repository.observeTasks()
         .catch { error ->
             if (error is CancellationException) throw error
             Log.w(TAG, "Error observing tasks", error)
-            emit(DataState.Error(error.message ?: "Unable to load your tasks."))
+            emit(emptyList())
         }
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
-            initialValue = DataState.Loading,
+            started = SharingStarted.WhileSubscribed(5000L),
+            initialValue = emptyList()
         )
 
-    init {
-        viewModelScope.launch {
-            combine(listsState, tasksState) { listsRes, tasksRes ->
-                val lists = (listsRes as? DataState.Success)?.data
-                val tasks = (tasksRes as? DataState.Success)?.data
-                if (lists != null && tasks != null) {
-                    lists.associateBy { it.id } to tasks
-                } else {
-                    null
-                }
-            }.collect { pair ->
-                if (pair != null) {
-                    reminderScheduler.syncReminders(pair.second, pair.first)
-                }
+    val availableCategories: StateFlow<List<String>> = allTasks.map { tasks ->
+        (TaskConstraints.DEFAULT_CATEGORIES + tasks.map { it.category })
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .sorted()
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000L),
+        initialValue = TaskConstraints.DEFAULT_CATEGORIES
+    )
+
+    val summaryStats: StateFlow<TaskSummaryStats> = allTasks.map { tasks ->
+        val todayKey = DateFormatters.dayKey(System.currentTimeMillis())
+        val active = tasks.filter { !it.isCompleted }
+        val completed = tasks.filter { it.isCompleted }
+        val overdue = active.count { t ->
+            t.dueDateMillis != null && DateFormatters.dayKey(t.dueDateMillis) < todayKey
+        }
+        val dueTodayOrCompletedToday = tasks.filter { t ->
+            val dueToday = t.dueDateMillis != null && DateFormatters.dayKey(t.dueDateMillis) == todayKey
+            val completedToday = t.isCompleted && t.completedAtMillis != null &&
+                DateFormatters.dayKey(t.completedAtMillis) == todayKey
+            dueToday || completedToday
+        }
+        val completedToday = dueTodayOrCompletedToday.count { it.isCompleted }
+        TaskSummaryStats(
+            activeCount = active.size,
+            overdueCount = overdue,
+            todayTotalCount = dueTodayOrCompletedToday.size,
+            todayCompletedCount = completedToday,
+            completedCount = completed.size
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000L),
+        initialValue = TaskSummaryStats()
+    )
+
+    val filteredTasks: StateFlow<List<TaskItem>> = combine(allTasks, filterState) { tasks, filter ->
+        val todayKey = DateFormatters.dayKey(System.currentTimeMillis())
+        val q = filter.query.trim()
+
+        val matched = tasks.filter { task ->
+            val dueKey = task.dueDateMillis?.let { DateFormatters.dayKey(it) }
+            val matchesView = when (filter.viewFilter) {
+                TaskViewFilter.ALL -> !task.isCompleted
+                TaskViewFilter.TODAY -> !task.isCompleted && dueKey != null && dueKey <= todayKey
+                TaskViewFilter.UPCOMING -> !task.isCompleted && dueKey != null && dueKey > todayKey
+                TaskViewFilter.OVERDUE -> !task.isCompleted && dueKey != null && dueKey < todayKey
+                TaskViewFilter.COMPLETED -> task.isCompleted
+            }
+            val matchesCategory = filter.selectedCategory == null ||
+                task.category.equals(filter.selectedCategory, ignoreCase = true)
+            val matchesPriority = filter.selectedPriority == null ||
+                task.priority == filter.selectedPriority
+            val matchesQuery = q.isEmpty() ||
+                task.title.contains(q, ignoreCase = true) ||
+                task.notes.contains(q, ignoreCase = true) ||
+                task.category.contains(q, ignoreCase = true) ||
+                task.subTasks.any { it.title.contains(q, ignoreCase = true) }
+
+            matchesView && matchesCategory && matchesPriority && matchesQuery
+        }
+
+        if (filter.viewFilter == TaskViewFilter.COMPLETED) {
+            matched.sortedByDescending { it.completedAtMillis ?: it.updatedAtMillis }
+        } else {
+            when (filter.sortOption) {
+                TaskSortOption.SMART -> matched.sortedWith(
+                    compareBy<TaskItem> { it.dueDateMillis?.let { d -> DateFormatters.dayKey(d) } ?: Long.MAX_VALUE }
+                        .thenByDescending { it.priority.sortRank }
+                        .thenByDescending { it.createdAtMillis }
+                )
+
+                TaskSortOption.PRIORITY -> matched.sortedWith(
+                    compareByDescending<TaskItem> { it.priority.sortRank }
+                        .thenBy { it.dueDateMillis ?: Long.MAX_VALUE }
+                        .thenByDescending { it.createdAtMillis }
+                )
+
+                TaskSortOption.DUE_DATE -> matched.sortedWith(
+                    compareBy<TaskItem> { it.dueDateMillis ?: Long.MAX_VALUE }
+                        .thenByDescending { it.priority.sortRank }
+                )
+
+                TaskSortOption.NEWEST -> matched.sortedByDescending { it.createdAtMillis }
             }
         }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000L),
+        initialValue = emptyList()
+    )
+
+    fun selectViewFilter(viewFilter: TaskViewFilter) {
+        _filterState.update { it.copy(viewFilter = viewFilter) }
     }
 
-    fun selectTab(tab: MainDestination) {
-        _controls.update {
-            it.copy(
-                currentTab = tab,
-                selectedListDetailId = if (tab == MainDestination.LISTS) it.selectedListDetailId else null,
-            )
-        }
+    fun updateSearchQuery(query: String) {
+        _filterState.update { it.copy(query = query) }
     }
 
-    fun setTimelineListFilter(listId: String?) {
-        _controls.update { it.copy(timelineListFilterId = listId) }
+    fun selectCategory(category: String?) {
+        _filterState.update { it.copy(selectedCategory = category) }
     }
 
-    fun toggleShowCompletedInTimeline() {
-        _controls.update { it.copy(showCompletedInTimeline = !it.showCompletedInTimeline) }
+    fun selectPriority(priority: TaskPriority?) {
+        _filterState.update { it.copy(selectedPriority = priority) }
     }
 
-    fun selectCalendarDate(date: DayDate) {
-        _controls.update {
-            it.copy(
-                calendarSelectedDate = date,
-                calendarDisplayedMonth = date.firstOfMonth(),
-            )
-        }
+    fun selectSortOption(option: TaskSortOption) {
+        _filterState.update { it.copy(sortOption = option) }
     }
 
-    fun shiftCalendarMonth(deltaMonths: Int) {
-        _controls.update {
-            val nextMonth = it.calendarDisplayedMonth.plusMonths(deltaMonths).firstOfMonth()
-            it.copy(calendarDisplayedMonth = nextMonth)
-        }
-    }
-
-    fun jumpCalendarToToday() {
-        val today = DayDate.today()
-        _controls.update {
-            it.copy(
-                calendarSelectedDate = today,
-                calendarDisplayedMonth = today.firstOfMonth(),
-            )
-        }
-    }
-
-    fun setCalendarListFilter(listId: String?) {
-        _controls.update { it.copy(calendarListFilterId = listId) }
-    }
-
-    fun openListDetail(listId: String?) {
-        _controls.update { it.copy(selectedListDetailId = listId) }
-    }
-
-    fun openNewTaskEditor(
-        prefillDate: DayDate? = null,
-        prefillListId: String? = null,
-    ) {
-        val state = _controls.value
-        val defaultDate = prefillDate ?: when (state.currentTab) {
-            MainDestination.CALENDAR -> state.calendarSelectedDate
-            else -> DayDate.today()
-        }
-        val defaultListId = prefillListId
-            ?: state.selectedListDetailId
-            ?: when (state.currentTab) {
-                MainDestination.TIMELINE -> state.timelineListFilterId
-                MainDestination.CALENDAR -> state.calendarListFilterId
-                MainDestination.LISTS -> null
-            }
-        _controls.update {
-            it.copy(
-                taskEditorDraft = TaskEditorDraft(
-                    existingTask = null,
-                    prefillDate = defaultDate,
-                    prefillListId = defaultListId,
-                )
-            )
-        }
-    }
-
-    fun openEditTaskEditor(task: TaskItem) {
-        _controls.update {
-            it.copy(
-                taskEditorDraft = TaskEditorDraft(
-                    existingTask = task,
-                    prefillDate = task.dueDate(),
-                    prefillListId = task.listId,
-                )
-            )
-        }
-    }
-
-    fun dismissTaskEditor() {
-        _controls.update { it.copy(taskEditorDraft = null) }
-    }
-
-    fun openNewListEditor() {
-        _controls.update { it.copy(listEditorDraft = ListEditorDraft(existingList = null)) }
-    }
-
-    fun openEditListEditor(list: TaskList) {
-        _controls.update { it.copy(listEditorDraft = ListEditorDraft(existingList = list)) }
-    }
-
-    fun dismissListEditor() {
-        _controls.update { it.copy(listEditorDraft = null) }
-    }
-
-    fun clearSnackbar() {
-        _controls.update { it.copy(snackbarMessage = null) }
-    }
-
-    fun showMessage(message: String) {
-        _controls.update { it.copy(snackbarMessage = message) }
-    }
-
-    fun saveList(
-        existingList: TaskList?,
-        name: String,
-        colorHex: String,
-        iconKey: String,
-        onCreated: ((String) -> Unit)? = null,
-    ) {
-        val currentLists = (listsState.value as? DataState.Success)?.data.orEmpty()
-        viewModelScope.launch {
-            _controls.update { it.copy(isMutating = true) }
-            val result = if (existingList == null) {
-                repository.addList(
-                    name = name,
-                    colorHex = colorHex,
-                    iconKey = iconKey,
-                    sortOrder = currentLists.size.toLong(),
-                )
-            } else {
-                repository.updateList(
-                    listId = existingList.id,
-                    name = name,
-                    colorHex = colorHex,
-                    iconKey = iconKey,
-                ).map { existingList.id }
-            }
-
-            result.fold(
-                onSuccess = { createdOrUpdatedId ->
-                    _controls.update {
-                        it.copy(
-                            isMutating = false,
-                            listEditorDraft = null,
-                            snackbarMessage = if (existingList == null) "List \"$name\" created" else "List updated",
-                        )
-                    }
-                    onCreated?.invoke(createdOrUpdatedId)
-                },
-                onFailure = { error ->
-                    _controls.update {
-                        it.copy(
-                            isMutating = false,
-                            snackbarMessage = error.message ?: "Could not save list.",
-                        )
-                    }
-                }
-            )
-        }
-    }
-
-    fun deleteList(list: TaskList) {
-        val allTasks = (tasksState.value as? DataState.Success)?.data.orEmpty()
-        val tasksInList = allTasks.filter { it.listId == list.id }
-        viewModelScope.launch {
-            _controls.update { it.copy(isMutating = true) }
-            val result = repository.deleteList(list.id)
-            result.fold(
-                onSuccess = {
-                    tasksInList.forEach { reminderScheduler.cancelReminder(it.id) }
-                    _controls.update { state ->
-                        state.copy(
-                            isMutating = false,
-                            selectedListDetailId = if (state.selectedListDetailId == list.id) null else state.selectedListDetailId,
-                            timelineListFilterId = if (state.timelineListFilterId == list.id) null else state.timelineListFilterId,
-                            calendarListFilterId = if (state.calendarListFilterId == list.id) null else state.calendarListFilterId,
-                            snackbarMessage = "Deleted list \"${list.name}\"",
-                        )
-                    }
-                },
-                onFailure = { error ->
-                    _controls.update {
-                        it.copy(
-                            isMutating = false,
-                            snackbarMessage = error.message ?: "Could not delete list.",
-                        )
-                    }
-                }
-            )
+    fun clearExtraFilters() {
+        _filterState.update {
+            it.copy(query = "", selectedCategory = null, selectedPriority = null)
         }
     }
 
     fun saveTask(
-        existingTask: TaskItem?,
+        taskId: String?,
         title: String,
-        notes: String?,
-        dueDate: DayDate,
-        reminderEpochMillis: Long?,
-        selectedListId: String?,
+        notes: String,
+        dueDateMillis: Long?,
+        priority: TaskPriority,
+        category: String,
+        recurrence: TaskRecurrence,
+        subTasks: List<SubTask>,
+        isCompleted: Boolean? = null,
+        onSuccess: () -> Unit = {}
     ) {
         viewModelScope.launch {
-            _controls.update { it.copy(isMutating = true) }
-
-            val resolvedListId = if (!selectedListId.isNullOrBlank()) {
-                selectedListId
-            } else {
-                val existingLists = (listsState.value as? DataState.Success)?.data.orEmpty()
-                if (existingLists.isNotEmpty()) {
-                    existingLists.first().id
-                } else {
-                    val createdDefault = repository.addList(
-                        name = "Personal",
-                        colorHex = ProjectColorPalette.DEFAULT_HEX,
-                        iconKey = ListIconOption.PERSONAL.key,
-                        sortOrder = 0L,
-                    )
-                    val newId = createdDefault.getOrNull()
-                    if (newId == null) {
-                        _controls.update {
-                            it.copy(
-                                isMutating = false,
-                                snackbarMessage = createdDefault.exceptionOrNull()?.message
-                                    ?: "Could not create a list for this task.",
-                            )
-                        }
-                        return@launch
-                    }
-                    newId
-                }
-            }
-
-            val listsById = (listsState.value as? DataState.Success)?.data
-                ?.associateBy { it.id }
-                .orEmpty()
-            val listName = listsById[resolvedListId]?.name ?: "Personal"
-
-            val result = if (existingTask == null) {
-                repository.addTask(
-                    listId = resolvedListId,
-                    title = title,
-                    notes = notes,
-                    dueDateEpochDay = dueDate.toEpochDay(),
-                    reminderEpochMillis = reminderEpochMillis,
-                )
-            } else {
-                repository.updateTask(
-                    taskId = existingTask.id,
-                    listId = resolvedListId,
-                    title = title,
-                    notes = notes,
-                    dueDateEpochDay = dueDate.toEpochDay(),
-                    reminderEpochMillis = reminderEpochMillis,
-                    completed = existingTask.completed,
-                    completedAtEpochMillis = existingTask.completedAtEpochMillis,
-                ).map { existingTask.id }
-            }
-
+            val result = repository.saveTask(
+                taskId = taskId,
+                title = title,
+                notes = notes,
+                dueDateMillis = dueDateMillis,
+                priority = priority,
+                category = category,
+                recurrence = recurrence,
+                subTasks = subTasks,
+                isCompleted = isCompleted
+            )
             result.fold(
-                onSuccess = { taskId ->
-                    val isCompleted = existingTask?.completed == true
-                    if (!isCompleted && reminderEpochMillis != null && reminderEpochMillis > System.currentTimeMillis()) {
-                        reminderScheduler.scheduleReminder(
-                            taskId = taskId,
-                            title = title.trim(),
-                            listName = listName,
-                            triggerAtMillis = reminderEpochMillis,
-                        )
-                    } else {
-                        reminderScheduler.cancelReminder(taskId)
+                onSuccess = { spawnedRecurring ->
+                    val msg = when {
+                        spawnedRecurring -> "Task completed · Next ${recurrence.label.lowercase()} task scheduled"
+                        taskId == null -> "Task added"
+                        else -> "Task updated"
                     }
-                    _controls.update {
-                        it.copy(
-                            isMutating = false,
-                            taskEditorDraft = null,
-                            snackbarMessage = if (existingTask == null) "Task added" else "Task updated",
-                        )
-                    }
+                    _events.tryEmit(msg)
+                    onSuccess()
                 },
-                onFailure = { error ->
-                    _controls.update {
-                        it.copy(
-                            isMutating = false,
-                            snackbarMessage = error.message ?: "Could not save task.",
-                        )
-                    }
+                onFailure = { err ->
+                    _events.tryEmit(err.localizedMessage ?: "Couldn't save task.")
                 }
             )
         }
     }
 
     fun toggleTaskCompleted(task: TaskItem) {
-        val nextCompleted = !task.completed
         viewModelScope.launch {
-            val result = repository.toggleTaskCompleted(
-                taskId = task.id,
-                completed = nextCompleted,
-            )
+            val result = repository.toggleTaskCompleted(task)
             result.fold(
-                onSuccess = {
-                    if (nextCompleted) {
-                        reminderScheduler.cancelReminder(task.id)
-                    } else {
-                        val rem = task.reminderEpochMillis
-                        if (rem != null && rem > System.currentTimeMillis()) {
-                            val listName = (listsState.value as? DataState.Success)?.data
-                                ?.firstOrNull { it.id == task.listId }?.name ?: "Personal"
-                            reminderScheduler.scheduleReminder(task.id, task.title, listName, rem)
-                        }
+                onSuccess = { spawnedRecurring ->
+                    if (spawnedRecurring) {
+                        _events.tryEmit("Task completed · Next ${task.recurrence.label.lowercase()} task scheduled")
                     }
                 },
-                onFailure = { error ->
-                    _controls.update {
-                        it.copy(snackbarMessage = error.message ?: "Could not update task.")
-                    }
+                onFailure = {
+                    _events.tryEmit("Couldn't update task.")
                 }
             )
         }
     }
 
-    fun deleteTask(task: TaskItem) {
+    fun toggleSubTask(task: TaskItem, subTaskId: String) {
         viewModelScope.launch {
-            _controls.update { it.copy(isMutating = true) }
-            val result = repository.deleteTask(task.id)
-            result.fold(
-                onSuccess = {
-                    reminderScheduler.cancelReminder(task.id)
-                    _controls.update {
-                        it.copy(
-                            isMutating = false,
-                            taskEditorDraft = null,
-                            snackbarMessage = "Task deleted",
-                        )
-                    }
-                },
-                onFailure = { error ->
-                    _controls.update {
-                        it.copy(
-                            isMutating = false,
-                            snackbarMessage = error.message ?: "Could not delete task.",
-                        )
-                    }
-                }
-            )
+            repository.toggleSubTask(task, subTaskId)
+        }
+    }
+
+    fun addSubTask(
+        task: TaskItem,
+        title: String,
+        dueDateMillis: Long? = null,
+        priority: TaskPriority = TaskPriority.NONE
+    ) {
+        viewModelScope.launch {
+            val result = repository.addSubTask(task, title, dueDateMillis, priority)
+            result.onFailure { err ->
+                _events.tryEmit(err.localizedMessage ?: "Couldn't add subtask.")
+            }
+        }
+    }
+
+    fun updateSubTask(task: TaskItem, subTask: SubTask) {
+        viewModelScope.launch {
+            val result = repository.updateSubTask(task, subTask)
+            result.onFailure { err ->
+                _events.tryEmit(err.localizedMessage ?: "Couldn't update subtask.")
+            }
+        }
+    }
+
+    fun deleteSubTask(task: TaskItem, subTaskId: String) {
+        viewModelScope.launch {
+            repository.deleteSubTask(task, subTaskId)
+        }
+    }
+
+    fun setAllSubTasksCompleted(task: TaskItem, completed: Boolean) {
+        viewModelScope.launch {
+            repository.setAllSubTasksCompleted(task, completed)
+        }
+    }
+
+    fun deleteTask(taskId: String) {
+        viewModelScope.launch {
+            val result = repository.deleteTask(taskId)
+            result.onSuccess { _events.tryEmit("Task deleted") }
+        }
+    }
+
+    fun clearCompletedTasks() {
+        viewModelScope.launch {
+            val result = repository.clearCompletedTasks()
+            result.onSuccess { _events.tryEmit("Completed tasks cleared") }
         }
     }
 
     private companion object {
-        const val TAG = "TaskViewModel"
-        const val STOP_TIMEOUT_MILLIS = 5000L
+        const val TAG = "TaskVM"
     }
 }

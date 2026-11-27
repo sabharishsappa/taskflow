@@ -16,6 +16,22 @@ const [emulatorHost, emulatorPortStr] = (
 ).split(":");
 const emulatorPort = parseInt(emulatorPortStr, 10);
 
+function validEntryPayload(uid, overrides = {}) {
+  const past = new Date(Date.now() - 5000);
+  return {
+    userId: uid,
+    title: "Morning Walk by the River",
+    content: "The air felt crisp and quiet after last night's rain.",
+    mood: "CALM",
+    favorite: false,
+    tags: ["morning", "nature"],
+    wordCount: 10,
+    createdAt: past,
+    updatedAt: past,
+    ...overrides,
+  };
+}
+
 before(async () => {
   const rules = fs.readFileSync("./firestore.rules", "utf8");
   testEnv = await initializeTestEnvironment({
@@ -40,414 +56,188 @@ beforeEach(async () => {
   }
 });
 
-function pastTime(offsetMs = 5000) {
-  return new Date(Date.now() - offsetMs);
-}
-
-// --- UNAUTHENTICATED ACCESS TESTS ---
-
-test("Unauthenticated user: cannot read or write lists or tasks", async () => {
+test("Unauthenticated user cannot read or write journal entries", async () => {
   const unauthDb = testEnv.unauthenticatedContext().firestore();
-  const now = pastTime();
-
-  await assertFails(unauthDb.collection("users").doc(ALICE_UID).collection("lists").get());
-  await assertFails(unauthDb.collection("users").doc(ALICE_UID).collection("tasks").get());
   await assertFails(
-    unauthDb.collection("users").doc(ALICE_UID).collection("lists").doc("list_1").set({
-      userId: ALICE_UID,
-      name: "Personal",
-      colorHex: "#235340",
-      iconKey: "personal",
-      sortOrder: 0,
-      createdAt: now,
-      updatedAt: now,
-    })
+    unauthDb.collection("users").doc(ALICE_UID).collection("entries").get()
   );
   await assertFails(
-    unauthDb.collection("users").doc(ALICE_UID).collection("tasks").doc("task_1").set({
-      userId: ALICE_UID,
-      listId: "list_1",
-      title: "Buy milk",
-      dueDateEpochDay: 20778,
-      completed: false,
-      createdAt: now,
-      updatedAt: now,
-    })
+    unauthDb
+      .collection("users")
+      .doc(ALICE_UID)
+      .collection("entries")
+      .doc("entry_1")
+      .set(validEntryPayload(ALICE_UID))
   );
 });
 
-// --- LISTS CRUD & VALIDATION TESTS ---
-
-test("Authenticated owner: valid Kotlin TaskList create, list, update, delete succeed", async () => {
+test("Authenticated owner can create, list, orderBy createdAt, update, toggle favorite, and delete", async () => {
   const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
-  const created = pastTime(10000);
+  const entriesRef = aliceDb
+    .collection("users")
+    .doc(ALICE_UID)
+    .collection("entries");
 
-  // Empty subcollection list query succeeds (mirrors TaskRepository.observeLists)
+  // Empty subcollection list query (mirrors Kotlin observeEntries)
+  await assertSucceeds(entriesRef.orderBy("createdAt", "desc").get());
+
+  // Create valid entry mirroring Kotlin JournalRepository.createEntry()
   await assertSucceeds(
-    aliceDb.collection("users").doc(ALICE_UID).collection("lists").orderBy("sortOrder").get()
+    entriesRef.doc("entry_1").set(validEntryPayload(ALICE_UID))
   );
 
-  // Create payload (NO @DocumentId `id` field)
+  // Get single entry
+  await assertSucceeds(entriesRef.doc("entry_1").get());
+
+  // List populated entries ordered by createdAt desc
+  await assertSucceeds(entriesRef.orderBy("createdAt", "desc").get());
+
+  // Partial update: toggle favorite (mirrors JournalRepository.toggleFavorite)
   await assertSucceeds(
-    aliceDb.collection("users").doc(ALICE_UID).collection("lists").doc("list_personal").set({
-      userId: ALICE_UID,
-      name: "Personal",
-      colorHex: "#235340",
-      iconKey: "personal",
-      sortOrder: 0,
-      createdAt: created,
-      updatedAt: created,
+    entriesRef.doc("entry_1").update({
+      favorite: true,
+      updatedAt: new Date(Date.now() - 1000),
     })
   );
 
-  // Partial update (mirrors TaskRepository.updateList)
+  // Partial update: full edit (mirrors JournalRepository.updateEntry)
   await assertSucceeds(
-    aliceDb.collection("users").doc(ALICE_UID).collection("lists").doc("list_personal").update({
-      name: "Daily Life",
-      colorHex: "#C86D4A",
-      iconKey: "home",
-      updatedAt: pastTime(1000),
+    entriesRef.doc("entry_1").update({
+      title: "Updated Morning Walk",
+      content: "Noticed the mist rising over the trees.",
+      mood: "GRATEFUL",
+      favorite: true,
+      tags: ["gratitude"],
+      wordCount: 7,
+      updatedAt: new Date(Date.now() - 500),
     })
   );
 
-  // Delete list
-  await assertSucceeds(
-    aliceDb.collection("users").doc(ALICE_UID).collection("lists").doc("list_personal").delete()
-  );
+  // Delete own entry
+  await assertSucceeds(entriesRef.doc("entry_1").delete());
 });
 
-test("TaskList security bounds: reject ghost fields, id field, invalid color/icon, immutable createdAt, future timestamp", async () => {
-  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
-  const created = pastTime(10000);
-  const listsRef = aliceDb.collection("users").doc(ALICE_UID).collection("lists");
-
-  // Reject `@DocumentId` `id` field in payload
-  await assertFails(
-    listsRef.doc("list_bad_id").set({
-      id: "list_bad_id",
-      userId: ALICE_UID,
-      name: "Work",
-      colorHex: "#2B5B84",
-      iconKey: "work",
-      sortOrder: 1,
-      createdAt: created,
-      updatedAt: created,
-    })
-  );
-
-  // Reject ghost field
-  await assertFails(
-    listsRef.doc("list_ghost").set({
-      userId: ALICE_UID,
-      name: "Work",
-      colorHex: "#2B5B84",
-      iconKey: "work",
-      sortOrder: 1,
-      isAdmin: true,
-      createdAt: created,
-      updatedAt: created,
-    })
-  );
-
-  // Reject invalid hex color
-  await assertFails(
-    listsRef.doc("list_bad_color").set({
-      userId: ALICE_UID,
-      name: "Work",
-      colorHex: "green",
-      iconKey: "work",
-      sortOrder: 1,
-      createdAt: created,
-      updatedAt: created,
-    })
-  );
-
-  // Reject unknown icon key
-  await assertFails(
-    listsRef.doc("list_bad_icon").set({
-      userId: ALICE_UID,
-      name: "Work",
-      colorHex: "#2B5B84",
-      iconKey: "unknown_icon",
-      sortOrder: 1,
-      createdAt: created,
-      updatedAt: created,
-    })
-  );
-
-  // Reject tampered future timestamp
-  await assertFails(
-    listsRef.doc("list_future").set({
-      userId: ALICE_UID,
-      name: "Work",
-      colorHex: "#2B5B84",
-      iconKey: "work",
-      sortOrder: 1,
-      createdAt: new Date(Date.now() + 60000),
-      updatedAt: new Date(Date.now() + 60000),
-    })
-  );
-
-  // Create valid list then test immutable createdAt & userId
-  await assertSucceeds(
-    listsRef.doc("list_ok").set({
-      userId: ALICE_UID,
-      name: "Work",
-      colorHex: "#2B5B84",
-      iconKey: "work",
-      sortOrder: 1,
-      createdAt: created,
-      updatedAt: created,
-    })
-  );
-
-  await assertFails(
-    listsRef.doc("list_ok").update({
-      createdAt: pastTime(500),
-      updatedAt: pastTime(500),
-    })
-  );
-
-  await assertFails(
-    listsRef.doc("list_ok").update({
-      userId: BOB_UID,
-      updatedAt: pastTime(500),
-    })
-  );
-});
-
-// --- TASKS CRUD, PARENT EXISTENCE & ACTION-BASED UPDATE TESTS ---
-
-test("Authenticated owner: valid Kotlin TaskItem create, toggle completion, edit, clear reminder, delete succeed", async () => {
-  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
-  const created = pastTime(10000);
-  const listsRef = aliceDb.collection("users").doc(ALICE_UID).collection("lists");
-  const tasksRef = aliceDb.collection("users").doc(ALICE_UID).collection("tasks");
-
-  // Empty tasks list query succeeds (mirrors TaskRepository.observeTasks)
-  await assertSucceeds(tasksRef.orderBy("dueDateEpochDay").get());
-
-  // Task creation MUST fail if referenced listId does not exist (Global Consistency Invariant)
-  await assertFails(
-    tasksRef.doc("task_orphan").set({
-      userId: ALICE_UID,
-      listId: "missing_list",
-      title: "Orphaned task",
-      dueDateEpochDay: 20778,
-      completed: false,
-      createdAt: created,
-      updatedAt: created,
-    })
-  );
-
-  // Create two lists
-  await assertSucceeds(
-    listsRef.doc("list_work").set({
-      userId: ALICE_UID,
-      name: "Work",
-      colorHex: "#2B5B84",
-      iconKey: "work",
-      sortOrder: 0,
-      createdAt: created,
-      updatedAt: created,
-    })
-  );
-  await assertSucceeds(
-    listsRef.doc("list_home").set({
-      userId: ALICE_UID,
-      name: "Home",
-      colorHex: "#C86D4A",
-      iconKey: "home",
-      sortOrder: 1,
-      createdAt: created,
-      updatedAt: created,
-    })
-  );
-
-  // Create task with optional notes & reminder (mirrors TaskRepository.addTask)
-  await assertSucceeds(
-    tasksRef.doc("task_1").set({
-      userId: ALICE_UID,
-      listId: "list_work",
-      title: "Prepare Q4 roadmap",
-      notes: "Include design milestones",
-      dueDateEpochDay: 20780,
-      reminderEpochMillis: Date.now() + 3600000,
-      completed: false,
-      createdAt: created,
-      updatedAt: created,
-    })
-  );
-
-  // Action 1: Toggle completion (mirrors TaskRepository.toggleTaskCompleted)
-  await assertSucceeds(
-    tasksRef.doc("task_1").update({
-      completed: true,
-      completedAtEpochMillis: Date.now(),
-      updatedAt: pastTime(1000),
-    })
-  );
-
-  // Action 2: Edit task details, move to another existing list, clear reminder via null
-  await assertSucceeds(
-    tasksRef.doc("task_1").update({
-      title: "Finalize Q4 roadmap",
-      notes: "Updated slides",
-      listId: "list_home",
-      dueDateEpochDay: 20785,
-      reminderEpochMillis: null,
-      completed: false,
-      completedAtEpochMillis: null,
-      updatedAt: pastTime(500),
-    })
-  );
-
-  // Moving task to a non-existent list must fail
-  await assertFails(
-    tasksRef.doc("task_1").update({
-      listId: "nonexistent_list",
-      updatedAt: pastTime(200),
-    })
-  );
-
-  // Delete task
-  await assertSucceeds(tasksRef.doc("task_1").delete());
-});
-
-test("TaskItem security bounds: reject oversized title, ghost fields, id field, immutable createdAt", async () => {
-  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
-  const created = pastTime(10000);
-  const listsRef = aliceDb.collection("users").doc(ALICE_UID).collection("lists");
-  const tasksRef = aliceDb.collection("users").doc(ALICE_UID).collection("tasks");
-
-  await assertSucceeds(
-    listsRef.doc("list_1").set({
-      userId: ALICE_UID,
-      name: "Personal",
-      colorHex: "#235340",
-      iconKey: "personal",
-      sortOrder: 0,
-      createdAt: created,
-      updatedAt: created,
-    })
-  );
-
-  // Reject oversized title (> 200 chars)
-  await assertFails(
-    tasksRef.doc("task_long").set({
-      userId: ALICE_UID,
-      listId: "list_1",
-      title: "a".repeat(201),
-      dueDateEpochDay: 20780,
-      completed: false,
-      createdAt: created,
-      updatedAt: created,
-    })
-  );
-
-  // Reject `@DocumentId` `id` field
-  await assertFails(
-    tasksRef.doc("task_with_id").set({
-      id: "task_with_id",
-      userId: ALICE_UID,
-      listId: "list_1",
-      title: "Valid title",
-      dueDateEpochDay: 20780,
-      completed: false,
-      createdAt: created,
-      updatedAt: created,
-    })
-  );
-
-  // Reject ghost field on create
-  await assertFails(
-    tasksRef.doc("task_ghost").set({
-      userId: ALICE_UID,
-      listId: "list_1",
-      title: "Valid title",
-      dueDateEpochDay: 20780,
-      completed: false,
-      priority: "urgent",
-      createdAt: created,
-      updatedAt: created,
-    })
-  );
-
-  // Create valid task then reject immutable createdAt update and wrong type value poisoning
-  await assertSucceeds(
-    tasksRef.doc("task_valid").set({
-      userId: ALICE_UID,
-      listId: "list_1",
-      title: "Call dentist",
-      dueDateEpochDay: 20780,
-      completed: false,
-      createdAt: created,
-      updatedAt: created,
-    })
-  );
-
-  await assertFails(
-    tasksRef.doc("task_valid").update({
-      createdAt: pastTime(100),
-      updatedAt: pastTime(100),
-    })
-  );
-
-  await assertFails(
-    tasksRef.doc("task_valid").update({
-      completed: "yes",
-      updatedAt: pastTime(100),
-    })
-  );
-});
-
-// --- CROSS-USER ISOLATION TESTS ---
-
-test("Cross-user isolation: Alice cannot read, list, create, update, or delete Bob's lists or tasks", async () => {
-  const created = pastTime(10000);
+test("Cross-user isolation blocks Bob from reading, writing, updating, or deleting Alice's entries", async () => {
   await testEnv.withSecurityRulesDisabled(async (context) => {
-    const adminDb = context.firestore();
-    await adminDb.collection("users").doc(BOB_UID).collection("lists").doc("bob_list").set({
-      userId: BOB_UID,
-      name: "Bob Private",
-      colorHex: "#7A4988",
-      iconKey: "personal",
-      sortOrder: 0,
-      createdAt: created,
-      updatedAt: created,
-    });
-    await adminDb.collection("users").doc(BOB_UID).collection("tasks").doc("bob_task").set({
-      userId: BOB_UID,
-      listId: "bob_list",
-      title: "Bob Secret Task",
-      dueDateEpochDay: 20780,
-      completed: false,
-      createdAt: created,
-      updatedAt: created,
-    });
+    await context
+      .firestore()
+      .collection("users")
+      .doc(ALICE_UID)
+      .collection("entries")
+      .doc("entry_alice")
+      .set(validEntryPayload(ALICE_UID));
   });
 
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const aliceEntries = bobDb
+    .collection("users")
+    .doc(ALICE_UID)
+    .collection("entries");
+
+  await assertFails(aliceEntries.get());
+  await assertFails(aliceEntries.doc("entry_alice").get());
+  await assertFails(
+    aliceEntries.doc("entry_bob_injected").set(validEntryPayload(BOB_UID))
+  );
+  await assertFails(
+    aliceEntries.doc("entry_alice").update({
+      favorite: true,
+      updatedAt: new Date(Date.now() - 1000),
+    })
+  );
+  await assertFails(aliceEntries.doc("entry_alice").delete());
+});
+
+test("Schema validation rejects ghost fields, @DocumentId 'id', invalid mood, future timestamp, oversized title, and immutable createdAt edits", async () => {
   const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const entriesRef = aliceDb
+    .collection("users")
+    .doc(ALICE_UID)
+    .collection("entries");
 
-  // Lists isolation
-  await assertFails(aliceDb.collection("users").doc(BOB_UID).collection("lists").get());
-  await assertFails(aliceDb.collection("users").doc(BOB_UID).collection("lists").doc("bob_list").get());
+  // Reject ghost field (Shadow Update / Create test)
   await assertFails(
-    aliceDb.collection("users").doc(BOB_UID).collection("lists").doc("bob_list").update({
-      name: "Hijacked",
-      updatedAt: pastTime(1000),
+    entriesRef
+      .doc("entry_ghost")
+      .set(validEntryPayload(ALICE_UID, { isAdmin: true }))
+  );
+
+  // Reject @DocumentId 'id' inside document body
+  await assertFails(
+    entriesRef
+      .doc("entry_with_id")
+      .set(validEntryPayload(ALICE_UID, { id: "entry_with_id" }))
+  );
+
+  // Reject invalid mood enum
+  await assertFails(
+    entriesRef
+      .doc("entry_bad_mood")
+      .set(validEntryPayload(ALICE_UID, { mood: "calm" }))
+  );
+
+  // Reject future timestamp
+  await assertFails(
+    entriesRef
+      .doc("entry_future")
+      .set(
+        validEntryPayload(ALICE_UID, {
+          createdAt: new Date(Date.now() + 60000),
+          updatedAt: new Date(Date.now() + 60000),
+        })
+      )
+  );
+
+  // Reject empty or oversized title
+  await assertFails(
+    entriesRef.doc("entry_empty_title").set(validEntryPayload(ALICE_UID, { title: "" }))
+  );
+  await assertFails(
+    entriesRef
+      .doc("entry_long_title")
+      .set(validEntryPayload(ALICE_UID, { title: "a".repeat(161) }))
+  );
+
+  // Reject too many tags (> 8)
+  await assertFails(
+    entriesRef.doc("entry_many_tags").set(
+      validEntryPayload(ALICE_UID, {
+        tags: ["1", "2", "3", "4", "5", "6", "7", "8", "9"],
+      })
+    )
+  );
+
+  // Reject spoofed userId
+  await assertFails(
+    entriesRef
+      .doc("entry_spoof")
+      .set(validEntryPayload(ALICE_UID, { userId: BOB_UID }))
+  );
+
+  // Create valid doc, then test update immutability & value poisoning
+  await assertSucceeds(
+    entriesRef.doc("entry_valid").set(validEntryPayload(ALICE_UID))
+  );
+
+  // Reject mutating immutable createdAt
+  await assertFails(
+    entriesRef.doc("entry_valid").update({
+      createdAt: new Date(Date.now() - 1000),
+      updatedAt: new Date(Date.now() - 1000),
     })
   );
-  await assertFails(aliceDb.collection("users").doc(BOB_UID).collection("lists").doc("bob_list").delete());
 
-  // Tasks isolation
-  await assertFails(aliceDb.collection("users").doc(BOB_UID).collection("tasks").get());
-  await assertFails(aliceDb.collection("users").doc(BOB_UID).collection("tasks").doc("bob_task").get());
-  await assertFails(
-    aliceDb.collection("users").doc(BOB_UID).collection("tasks").doc("bob_task").update({
-      completed: true,
-      updatedAt: pastTime(1000),
+  // Reject value poisoning on allowlisted key
+  await assertSucceeds(
+    entriesRef.doc("entry_valid").update({
+      favorite: true,
+      updatedAt: new Date(Date.now() - 1000),
     })
   );
-  await assertFails(aliceDb.collection("users").doc(BOB_UID).collection("tasks").doc("bob_task").delete());
+  await assertFails(
+    entriesRef.doc("entry_valid").update({
+      favorite: "not_a_boolean",
+      updatedAt: new Date(Date.now() - 500),
+    })
+  );
 });

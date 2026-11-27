@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Dayloom"
+rootProject.name = "Daybook"
 
 include(":app")

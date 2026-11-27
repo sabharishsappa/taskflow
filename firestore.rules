@@ -1,13 +1,13 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
+
     // Global default-deny safety net
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Shared hardened primitives
+    // Reusable hardened security primitives
     function isSignedIn() {
       return request.auth != null;
     }
@@ -28,115 +28,65 @@ service cloud.firestore {
       return resource.data;
     }
 
-    function isValidIconKey(key) {
-      return key is string && key in [
-        'personal',
-        'work',
-        'home',
-        'wellness',
-        'errands',
-        'study',
-        'finance',
-        'creative',
-        'travel',
-        'star'
-      ];
+    function isValidMood(mood) {
+      return mood is string && mood in ['CALM', 'JOYFUL', 'GRATEFUL', 'REFLECTIVE', 'TIRED', 'ANXIOUS'];
     }
 
-    function isValidTaskList(data, userId) {
-      return data.userId is string &&
-             data.userId == userId &&
-             data.userId == request.auth.uid &&
-             data.name is string &&
-             data.name.size() >= 1 &&
-             data.name.size() <= 60 &&
-             data.colorHex is string &&
-             data.colorHex.size() == 7 &&
-             data.colorHex.matches('^#[0-9A-Fa-f]{6}$') &&
-             isValidIconKey(data.iconKey) &&
-             data.sortOrder is int &&
-             data.sortOrder >= 0 &&
-             data.sortOrder <= 10000 &&
-             data.createdAt is timestamp &&
-             data.createdAt <= request.time &&
-             data.updatedAt is timestamp &&
-             data.updatedAt <= request.time;
+    function isValidTags(tags) {
+      return tags is list &&
+             tags.size() <= 8 &&
+             (tags.size() == 0 || (tags[0] is string && tags[0].size() >= 1 && tags[0].size() <= 30));
     }
 
-    function isValidTaskItem(data, userId) {
-      return data.userId is string &&
-             data.userId == userId &&
-             data.userId == request.auth.uid &&
-             isValidId(data.listId) &&
-             data.title is string &&
-             data.title.size() >= 1 &&
-             data.title.size() <= 200 &&
-             (!('notes' in data) || data.notes == null || (data.notes is string && data.notes.size() <= 1000)) &&
-             data.dueDateEpochDay is int &&
-             data.dueDateEpochDay >= -365000 &&
-             data.dueDateEpochDay <= 365000 &&
-             (!('reminderEpochMillis' in data) || data.reminderEpochMillis == null || (data.reminderEpochMillis is int && data.reminderEpochMillis >= 0)) &&
-             data.completed is bool &&
-             (!('completedAtEpochMillis' in data) || data.completedAtEpochMillis == null || (data.completedAtEpochMillis is int && data.completedAtEpochMillis >= 0)) &&
-             data.createdAt is timestamp &&
-             data.createdAt <= request.time &&
-             data.updatedAt is timestamp &&
-             data.updatedAt <= request.time;
+    // Standalone validation blueprint for JournalEntry
+    function isValidJournalEntry(data, userId) {
+      return data.keys().hasAll([
+               'userId', 'title', 'content', 'mood', 'favorite',
+               'tags', 'wordCount', 'createdAt', 'updatedAt'
+             ]) &&
+             data.keys().hasOnly([
+               'userId', 'title', 'content', 'mood', 'favorite',
+               'tags', 'wordCount', 'createdAt', 'updatedAt'
+             ]) &&
+             data.userId is string && data.userId == userId && data.userId == request.auth.uid && data.userId.size() <= 128 &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 160 &&
+             data.content is string && data.content.size() >= 1 && data.content.size() <= 20000 &&
+             isValidMood(data.mood) &&
+             data.favorite is bool &&
+             isValidTags(data.tags) &&
+             data.wordCount is int && data.wordCount >= 0 && data.wordCount <= 20000 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
 
-    // User-scoped task lists
-    match /users/{userId}/lists/{listId} {
-      allow get: if isOwner(userId) && isValidId(userId) && isValidId(listId);
-      allow list: if isOwner(userId);
+    // Private user-scoped journal entries
+    match /users/{userId}/entries/{entryId} {
+      allow get: if isOwner(userId) && isValidId(userId) && isValidId(entryId);
+      allow list: if isOwner(userId) && isValidId(userId);
 
       allow create: if isOwner(userId) &&
                        isValidId(userId) &&
-                       isValidId(listId) &&
-                       incoming().keys().hasAll(['userId', 'name', 'colorHex', 'iconKey', 'sortOrder', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['userId', 'name', 'colorHex', 'iconKey', 'sortOrder', 'createdAt', 'updatedAt']) &&
-                       isValidTaskList(incoming(), userId);
+                       isValidId(entryId) &&
+                       isValidJournalEntry(incoming(), userId);
 
       allow update: if isOwner(userId) &&
                        isValidId(userId) &&
-                       isValidId(listId) &&
-                       isValidTaskList(incoming(), userId) &&
-                       incoming().userId == existing().userId &&
-                       incoming().createdAt == existing().createdAt &&
-                       incoming().diff(existing()).affectedKeys().hasOnly(['name', 'colorHex', 'iconKey', 'sortOrder', 'updatedAt']);
-
-      allow delete: if isOwner(userId) && isValidId(userId) && isValidId(listId);
-    }
-
-    // User-scoped tasks
-    match /users/{userId}/tasks/{taskId} {
-      allow get: if isOwner(userId) && isValidId(userId) && isValidId(taskId);
-      allow list: if isOwner(userId);
-
-      allow create: if isOwner(userId) &&
-                       isValidId(userId) &&
-                       isValidId(taskId) &&
-                       incoming().keys().hasAll(['userId', 'listId', 'title', 'dueDateEpochDay', 'completed', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['userId', 'listId', 'title', 'notes', 'dueDateEpochDay', 'reminderEpochMillis', 'completed', 'completedAtEpochMillis', 'createdAt', 'updatedAt']) &&
-                       isValidTaskItem(incoming(), userId) &&
-                       exists(/databases/$(database)/documents/users/$(userId)/lists/$(incoming().listId));
-
-      allow update: if isOwner(userId) &&
-                       isValidId(userId) &&
-                       isValidId(taskId) &&
-                       isValidTaskItem(incoming(), userId) &&
+                       isValidId(entryId) &&
+                       isValidJournalEntry(incoming(), userId) &&
                        incoming().userId == existing().userId &&
                        incoming().createdAt == existing().createdAt &&
                        (
-                         // Action 1: Toggle completion status
-                         incoming().diff(existing()).affectedKeys().hasOnly(['completed', 'completedAtEpochMillis', 'updatedAt']) ||
-                         // Action 2: Edit task details or move to another owned list
-                         (
-                           incoming().diff(existing()).affectedKeys().hasOnly(['title', 'notes', 'listId', 'dueDateEpochDay', 'reminderEpochMillis', 'completed', 'completedAtEpochMillis', 'updatedAt']) &&
-                           (incoming().listId == existing().listId || exists(/databases/$(database)/documents/users/$(userId)/lists/$(incoming().listId)))
-                         )
+                         // Action: Edit full journal entry content/metadata
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'title', 'content', 'mood', 'favorite', 'tags', 'wordCount', 'updatedAt'
+                         ]) ||
+                         // Action: Toggle favorite bookmark
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'favorite', 'updatedAt'
+                         ])
                        );
 
-      allow delete: if isOwner(userId) && isValidId(userId) && isValidId(taskId);
+      allow delete: if isOwner(userId) && isValidId(userId) && isValidId(entryId);
     }
   }
 }

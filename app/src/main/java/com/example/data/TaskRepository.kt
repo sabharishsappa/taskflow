@@ -1,170 +1,144 @@
 package com.example.data
 
-import com.example.data.local.DayloomDao
-import com.example.data.local.TaskItemEntity
-import com.example.data.local.TaskListEntity
-import com.example.model.ListIconOption
-import com.example.model.TaskItem
-import com.example.model.TaskList
-import java.util.UUID
+import com.example.ui.DateFormatters
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import java.util.UUID
 
 class TaskRepository(
-    private val dao: DayloomDao,
+    private val dao: TaskDao
 ) {
-    fun observeLists(): Flow<List<TaskList>> =
-        dao.observeLists().map { entities -> entities.map { it.toModel() } }
-
     fun observeTasks(): Flow<List<TaskItem>> =
-        dao.observeTasks().map { entities -> entities.map { it.toModel() } }
+        dao.observeTasks().map { list -> list.map { it.toDomain() } }
 
-    suspend fun addList(
-        name: String,
-        colorHex: String,
-        iconKey: String,
-        sortOrder: Long,
-    ): Result<String> {
-        val cleanName = name.trim()
-        return try {
-            require(cleanName.length in 1..60) { "List name must be 1 to 60 characters." }
-            require(colorHex.matches(COLOR_HEX_REGEX)) { "Color must be a valid #RRGGBB hex." }
-            val validIcon = ListIconOption.fromKey(iconKey).key
-            val safeOrder = sortOrder.coerceIn(0L, 10000L)
-            val now = System.currentTimeMillis()
-            val id = UUID.randomUUID().toString()
+    suspend fun getAllTasksSnapshot(): List<TaskItem> =
+        dao.getAllTasksOnce().map { it.toDomain() }
 
-            dao.insertList(
-                TaskListEntity(
-                    id = id,
-                    name = cleanName,
-                    colorHex = colorHex,
-                    iconKey = validIcon,
-                    sortOrder = safeOrder,
-                    createdAtEpochMillis = now,
-                    updatedAtEpochMillis = now,
-                )
-            )
-            Result.success(id)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    suspend fun updateList(
-        listId: String,
-        name: String,
-        colorHex: String,
-        iconKey: String,
-    ): Result<Unit> {
-        val cleanName = name.trim()
-        return try {
-            require(listId.isNotBlank()) { "List ID must not be blank." }
-            require(cleanName.length in 1..60) { "List name must be 1 to 60 characters." }
-            require(colorHex.matches(COLOR_HEX_REGEX)) { "Color must be a valid #RRGGBB hex." }
-            val validIcon = ListIconOption.fromKey(iconKey).key
-
-            dao.updateListDetails(
-                listId = listId,
-                name = cleanName,
-                colorHex = colorHex,
-                iconKey = validIcon,
-                updatedAt = System.currentTimeMillis(),
-            )
-            Result.success(Unit)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    suspend fun deleteList(listId: String): Result<Unit> {
-        return try {
-            require(listId.isNotBlank()) { "List ID must not be blank." }
-            dao.deleteListById(listId)
-            Result.success(Unit)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    suspend fun addTask(
-        listId: String,
+    suspend fun saveTask(
+        taskId: String?,
         title: String,
-        notes: String?,
-        dueDateEpochDay: Long,
-        reminderEpochMillis: Long?,
-    ): Result<String> {
-        val cleanTitle = title.trim()
-        val cleanNotes = notes?.trim()?.takeIf { it.isNotEmpty() }
+        notes: String,
+        dueDateMillis: Long?,
+        priority: TaskPriority,
+        category: String,
+        recurrence: TaskRecurrence,
+        subTasks: List<SubTask>,
+        isCompleted: Boolean? = null
+    ): Result<Boolean> {
         return try {
-            require(listId.isNotBlank()) { "Please select a list for this task." }
-            require(cleanTitle.length in 1..200) { "Task title must be 1 to 200 characters." }
-            require(cleanNotes == null || cleanNotes.length <= 1000) { "Notes cannot exceed 1000 characters." }
-            require(dueDateEpochDay in -365000L..365000L) { "Invalid due date." }
-            require(reminderEpochMillis == null || reminderEpochMillis >= 0L) { "Invalid reminder time." }
+            val cleanTitle = title.trim().take(TaskConstraints.MAX_TITLE_LENGTH)
+            require(cleanTitle.isNotEmpty()) { "Task title is required." }
+            val cleanNotes = notes.trim().take(TaskConstraints.MAX_NOTES_LENGTH)
+            val cleanCategory = category.trim().take(TaskConstraints.MAX_CATEGORY_LENGTH)
+            val cleanSubTasks = subTasks
+                .mapNotNull { st ->
+                    val t = st.title.trim().take(TaskConstraints.MAX_SUBTASK_LENGTH)
+                    if (t.isEmpty()) null else st.copy(
+                        id = st.id.ifBlank { UUID.randomUUID().toString() },
+                        title = t
+                    )
+                }
+                .take(TaskConstraints.MAX_SUBTASKS)
 
             val now = System.currentTimeMillis()
-            val id = UUID.randomUUID().toString()
-            dao.insertTask(
-                TaskItemEntity(
-                    id = id,
-                    listId = listId,
-                    title = cleanTitle,
-                    notes = cleanNotes,
-                    dueDateEpochDay = dueDateEpochDay,
-                    reminderEpochMillis = reminderEpochMillis,
-                    completed = false,
-                    completedAtEpochMillis = null,
-                    createdAtEpochMillis = now,
-                    updatedAtEpochMillis = now,
-                )
-            )
-            Result.success(id)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
+            val existing = taskId?.let { dao.getTaskById(it)?.toDomain() }
+            val finalId = existing?.id ?: UUID.randomUUID().toString()
+            val wasCompleted = existing?.isCompleted ?: false
+            val finalCompleted = isCompleted ?: wasCompleted
+            val finalCompletedAt = when {
+                finalCompleted && wasCompleted -> existing?.completedAtMillis ?: now
+                finalCompleted -> now
+                else -> null
+            }
 
-    suspend fun updateTask(
-        taskId: String,
-        listId: String,
-        title: String,
-        notes: String?,
-        dueDateEpochDay: Long,
-        reminderEpochMillis: Long?,
-        completed: Boolean,
-        completedAtEpochMillis: Long?,
-    ): Result<Unit> {
-        val cleanTitle = title.trim()
-        val cleanNotes = notes?.trim()?.takeIf { it.isNotEmpty() }
-        return try {
-            require(taskId.isNotBlank()) { "Task ID must not be blank." }
-            require(listId.isNotBlank()) { "Please select a list for this task." }
-            require(cleanTitle.length in 1..200) { "Task title must be 1 to 200 characters." }
-            require(cleanNotes == null || cleanNotes.length <= 1000) { "Notes cannot exceed 1000 characters." }
-            require(dueDateEpochDay in -365000L..365000L) { "Invalid due date." }
-            require(reminderEpochMillis == null || reminderEpochMillis >= 0L) { "Invalid reminder time." }
-
-            dao.updateTaskDetails(
-                taskId = taskId,
-                listId = listId,
+            val savedTask = TaskItem(
+                id = finalId,
                 title = cleanTitle,
                 notes = cleanNotes,
-                dueDateEpochDay = dueDateEpochDay,
-                reminderEpochMillis = reminderEpochMillis,
-                completed = completed,
-                completedAtEpochMillis = completedAtEpochMillis,
-                updatedAt = System.currentTimeMillis(),
+                dueDateMillis = dueDateMillis,
+                priority = priority,
+                category = cleanCategory,
+                recurrence = recurrence,
+                subTasks = cleanSubTasks,
+                isCompleted = finalCompleted,
+                completedAtMillis = finalCompletedAt,
+                createdAtMillis = existing?.createdAtMillis ?: now,
+                updatedAtMillis = now
             )
+            dao.upsertTask(TaskEntity.fromDomain(savedTask))
+
+            var spawnedRecurring = false
+            if (!wasCompleted && finalCompleted && recurrence != TaskRecurrence.NONE) {
+                spawnNextRecurringOccurrence(savedTask, now)
+                spawnedRecurring = true
+            }
+            Result.success(spawnedRecurring)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Toggles task completion. When completing a recurring task, marks the current occurrence
+     * completed and automatically creates the next scheduled occurrence with reset subtasks.
+     */
+    suspend fun toggleTaskCompleted(task: TaskItem): Result<Boolean> {
+        return try {
+            val now = System.currentTimeMillis()
+            val markCompleted = !task.isCompleted
+            val updated = task.copy(
+                isCompleted = markCompleted,
+                completedAtMillis = if (markCompleted) now else null,
+                updatedAtMillis = now
+            )
+            dao.upsertTask(TaskEntity.fromDomain(updated))
+
+            var spawnedRecurring = false
+            if (markCompleted && task.recurrence != TaskRecurrence.NONE) {
+                spawnNextRecurringOccurrence(task, now)
+                spawnedRecurring = true
+            }
+            Result.success(spawnedRecurring)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private suspend fun spawnNextRecurringOccurrence(task: TaskItem, now: Long) {
+        val baseDate = task.dueDateMillis ?: DateFormatters.todayMiddayMillis()
+        val nextDue = when (task.recurrence) {
+            TaskRecurrence.DAILY -> DateFormatters.addDays(baseDate, 1)
+            TaskRecurrence.WEEKLY -> DateFormatters.addDays(baseDate, 7)
+            TaskRecurrence.MONTHLY -> DateFormatters.addMonths(baseDate, 1)
+            TaskRecurrence.NONE -> baseDate
+        }
+        val nextTask = task.copy(
+            id = UUID.randomUUID().toString(),
+            dueDateMillis = nextDue,
+            subTasks = task.subTasks.map { it.copy(isCompleted = false) },
+            isCompleted = false,
+            completedAtMillis = null,
+            createdAtMillis = now + 1,
+            updatedAtMillis = now + 1
+        )
+        dao.upsertTask(TaskEntity.fromDomain(nextTask))
+    }
+
+    suspend fun toggleSubTask(task: TaskItem, subTaskId: String): Result<Unit> {
+        return try {
+            val updatedSubs = task.subTasks.map { st ->
+                if (st.id == subTaskId) st.copy(isCompleted = !st.isCompleted) else st
+            }
+            val updatedTask = task.copy(
+                subTasks = updatedSubs,
+                updatedAtMillis = System.currentTimeMillis()
+            )
+            dao.upsertTask(TaskEntity.fromDomain(updatedTask))
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
@@ -173,19 +147,82 @@ class TaskRepository(
         }
     }
 
-    suspend fun toggleTaskCompleted(
-        taskId: String,
-        completed: Boolean,
+    suspend fun addSubTask(
+        task: TaskItem,
+        title: String,
+        dueDateMillis: Long? = null,
+        priority: TaskPriority = TaskPriority.NONE
     ): Result<Unit> {
         return try {
-            require(taskId.isNotBlank()) { "Task ID must not be blank." }
-            val now = System.currentTimeMillis()
-            dao.updateTaskCompleted(
-                taskId = taskId,
-                completed = completed,
-                completedAtEpochMillis = if (completed) now else null,
-                updatedAt = now,
+            val clean = title.trim().take(TaskConstraints.MAX_SUBTASK_LENGTH)
+            require(clean.isNotEmpty()) { "Subtask title is required." }
+            if (task.subTasks.size >= TaskConstraints.MAX_SUBTASKS) {
+                return Result.failure(IllegalStateException("Maximum ${TaskConstraints.MAX_SUBTASKS} subtasks reached."))
+            }
+            val newSub = SubTask(
+                id = UUID.randomUUID().toString(),
+                title = clean,
+                isCompleted = false,
+                dueDateMillis = dueDateMillis,
+                priority = priority
             )
+            val updatedTask = task.copy(
+                subTasks = task.subTasks + newSub,
+                updatedAtMillis = System.currentTimeMillis()
+            )
+            dao.upsertTask(TaskEntity.fromDomain(updatedTask))
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateSubTask(task: TaskItem, updatedSubTask: SubTask): Result<Unit> {
+        return try {
+            val clean = updatedSubTask.title.trim().take(TaskConstraints.MAX_SUBTASK_LENGTH)
+            require(clean.isNotEmpty()) { "Subtask title is required." }
+            val updatedSubs = task.subTasks.map { st ->
+                if (st.id == updatedSubTask.id) updatedSubTask.copy(title = clean) else st
+            }
+            val updatedTask = task.copy(
+                subTasks = updatedSubs,
+                updatedAtMillis = System.currentTimeMillis()
+            )
+            dao.upsertTask(TaskEntity.fromDomain(updatedTask))
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteSubTask(task: TaskItem, subTaskId: String): Result<Unit> {
+        return try {
+            val updatedSubs = task.subTasks.filterNot { it.id == subTaskId }
+            val updatedTask = task.copy(
+                subTasks = updatedSubs,
+                updatedAtMillis = System.currentTimeMillis()
+            )
+            dao.upsertTask(TaskEntity.fromDomain(updatedTask))
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun setAllSubTasksCompleted(task: TaskItem, completed: Boolean): Result<Unit> {
+        return try {
+            val updatedSubs = task.subTasks.map { it.copy(isCompleted = completed) }
+            val updatedTask = task.copy(
+                subTasks = updatedSubs,
+                updatedAtMillis = System.currentTimeMillis()
+            )
+            dao.upsertTask(TaskEntity.fromDomain(updatedTask))
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
@@ -196,7 +233,6 @@ class TaskRepository(
 
     suspend fun deleteTask(taskId: String): Result<Unit> {
         return try {
-            require(taskId.isNotBlank()) { "Task ID must not be blank." }
             dao.deleteTaskById(taskId)
             Result.success(Unit)
         } catch (e: CancellationException) {
@@ -206,7 +242,43 @@ class TaskRepository(
         }
     }
 
-    companion object {
-        private val COLOR_HEX_REGEX = Regex("^#[0-9A-Fa-f]{6}$")
+    suspend fun clearCompletedTasks(): Result<Unit> {
+        return try {
+            dao.deleteCompletedTasks()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun importTasks(tasks: List<TaskItem>, mode: ImportMode): Result<Int> {
+        return try {
+            if (mode == ImportMode.REPLACE) {
+                dao.deleteAllTasks()
+            }
+            val entities = tasks.mapNotNull { task ->
+                val cleanTitle = task.title.trim().take(TaskConstraints.MAX_TITLE_LENGTH)
+                if (cleanTitle.isEmpty()) return@mapNotNull null
+                TaskEntity.fromDomain(
+                    task.copy(
+                        id = task.id.ifBlank { UUID.randomUUID().toString() },
+                        title = cleanTitle,
+                        notes = task.notes.trim().take(TaskConstraints.MAX_NOTES_LENGTH),
+                        category = task.category.trim().take(TaskConstraints.MAX_CATEGORY_LENGTH),
+                        subTasks = task.subTasks.take(TaskConstraints.MAX_SUBTASKS)
+                    )
+                )
+            }
+            if (entities.isNotEmpty()) {
+                dao.upsertTasks(entities)
+            }
+            Result.success(entities.size)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 }

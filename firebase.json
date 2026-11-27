@@ -1,7 +1,7 @@
 {
   "firestore": [
     {
-      "database": "ai-studio-android-taskflow-a71fe554-3724-4899-bf13-0858b091392d",
+      "database": "ai-studio-android-daybook-c90aec93-3f2c-4fc3-8b0e-df7c7e772892",
       "rules": "firestore.rules"
     }
   ],
