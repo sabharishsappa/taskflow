@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Folio Journal"
+rootProject.name = "PrismTask"
 
 include(":app")

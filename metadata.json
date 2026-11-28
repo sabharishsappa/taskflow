@@ -1,6 +1,6 @@
 {
-  "name": "Folio Journal",
-  "description": "An editorial personal journal app for capturing daily moments, activities, and events with dates, headings, rich stories, photo and file attachments, locations, and custom tags.",
+  "name": "PrismTask",
+  "description": "A simple, colourful, high-performance task manager with reminders, due dates, subtasks, and repetition.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

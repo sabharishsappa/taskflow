@@ -1,92 +1,83 @@
 {
   "entities": {
-    "JournalEntry": {
-      "title": "JournalEntry",
-      "description": "A personal journal entry capturing an activity, event, or daily reflection with date, heading, detailed matter, attachments, location, and tags.",
+    "TaskItem": {
+      "title": "TaskItem",
+      "description": "A user-owned task with optional due date, reminder timestamp, repetition schedule, color accent, and embedded subtasks.",
       "type": "object",
       "properties": {
         "userId": {
           "type": "string",
-          "description": "Authenticated Firebase Auth UID of the owner."
+          "description": "Authenticated owner Firebase UID matching the parent users/{userId} path."
         },
-        "heading": {
+        "title": {
           "type": "string",
-          "description": "Title or heading of the journal entry or event (1-200 chars)."
+          "description": "Concise task title (1 to 120 characters)."
         },
-        "body": {
+        "notes": {
           "type": "string",
-          "description": "Detailed matter or full written reflection (0-20000 chars)."
+          "description": "Optional additional task notes (0 to 500 characters)."
         },
-        "entryDateMillis": {
-          "type": "integer",
-          "description": "Epoch timestamp in milliseconds for the user-selected date of the activity or event."
-        },
-        "category": {
-          "type": "string",
-          "enum": ["REFLECTION", "ACTIVITY", "EVENT", "MILESTONE", "TRAVEL", "IDEA"],
-          "description": "Type of journal moment or event."
-        },
-        "locationName": {
-          "type": "string",
-          "description": "Human-readable place or venue name (0-200 chars)."
-        },
-        "locationLat": {
-          "type": "number",
-          "description": "Optional latitude coordinate (-90 to 90), omitted when absent."
-        },
-        "locationLng": {
-          "type": "number",
-          "description": "Optional longitude coordinate (-180 to 180), omitted when absent."
-        },
-        "tags": {
-          "type": "array",
-          "description": "Bounded list of up to 10 string tags for organizing and filtering entries."
-        },
-        "attachments": {
-          "type": "array",
-          "description": "Bounded list of up to 10 attachment metadata maps (id, name, mimeType, localPath, kind, sizeBytes)."
-        },
-        "bookmarked": {
+        "completed": {
           "type": "boolean",
-          "description": "Whether the entry is bookmarked/pinned for quick revisit."
+          "description": "Whether the task is currently marked complete."
         },
-        "wordCount": {
+        "colorKey": {
+          "type": "string",
+          "enum": ["CORAL", "TEAL", "AMBER", "VIOLET", "SKY", "BERRY"],
+          "description": "Vibrant color accent token assigned to the task."
+        },
+        "dueDateMillis": {
           "type": "integer",
-          "description": "Word count of heading and detailed body for journal insights."
+          "description": "Optional due date stored as UTC epoch milliseconds (> 0). Omitted when unset."
+        },
+        "reminderMillis": {
+          "type": "integer",
+          "description": "Optional reminder trigger time stored as UTC epoch milliseconds (> 0). Omitted when unset."
+        },
+        "repeatRule": {
+          "type": "string",
+          "enum": ["NONE", "DAILY", "WEEKDAYS", "WEEKLY", "MONTHLY"],
+          "description": "Repetition cadence applied when completing the task."
+        },
+        "repeatInterval": {
+          "type": "integer",
+          "description": "Positive repetition multiplier (1 to 365) paired with repeatRule."
+        },
+        "subtasks": {
+          "type": "array",
+          "description": "Bounded list (max 30) of embedded subtask objects with id, title, and done boolean."
         },
         "createdAt": {
           "type": "string",
           "format": "date-time",
-          "description": "Immutable server timestamp set via FieldValue.serverTimestamp() on creation."
+          "description": "Immutable creation timestamp written via FieldValue.serverTimestamp()."
         },
         "updatedAt": {
           "type": "string",
           "format": "date-time",
-          "description": "Server timestamp updated via FieldValue.serverTimestamp() on every write."
+          "description": "Last modification timestamp written via FieldValue.serverTimestamp()."
         }
       },
       "required": [
         "userId",
-        "heading",
-        "body",
-        "entryDateMillis",
-        "category",
-        "locationName",
-        "tags",
-        "attachments",
-        "bookmarked",
-        "wordCount",
+        "title",
+        "notes",
+        "completed",
+        "colorKey",
+        "repeatRule",
+        "repeatInterval",
+        "subtasks",
         "createdAt",
         "updatedAt"
       ]
     }
   },
   "firestore": {
-    "/users/{userId}/entries/{entryId}": {
+    "/users/{userId}/tasks/{taskId}": {
       "schema": {
-        "$ref": "#/entities/JournalEntry"
+        "$ref": "#/entities/TaskItem"
       },
-      "description": "User-scoped private collection of personal journal entries."
+      "description": "User-isolated subcollection storing all tasks owned by the authenticated user."
     }
   }
 }

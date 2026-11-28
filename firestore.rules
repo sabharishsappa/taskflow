@@ -1,14 +1,13 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Global default-deny safety net
+    // Global safety net: default-deny all unspecified paths
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Reusable hardened security primitives
+    // --- HARDENED GLOBAL HELPERS ---
     function isSignedIn() {
       return request.auth != null;
     }
@@ -29,68 +28,94 @@ service cloud.firestore {
       return resource.data;
     }
 
-    function isValidCategory(cat) {
-      return cat in ['REFLECTION', 'ACTIVITY', 'EVENT', 'MILESTONE', 'TRAVEL', 'IDEA'];
+    function isValidColorKey(val) {
+      return val in ['CORAL', 'TEAL', 'AMBER', 'VIOLET', 'SKY', 'BERRY'];
     }
 
-    function isValidJournalEntry(data) {
-      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
-             data.userId == request.auth.uid &&
-             data.heading is string && data.heading.size() >= 1 && data.heading.size() <= 200 &&
-             data.body is string && data.body.size() <= 20000 &&
-             data.entryDateMillis is int && data.entryDateMillis > 0 &&
-             data.category is string && data.category.size() <= 32 && isValidCategory(data.category) &&
-             data.locationName is string && data.locationName.size() <= 200 &&
-             (!('locationLat' in data) || data.locationLat == null || (data.locationLat is number && data.locationLat >= -90 && data.locationLat <= 90)) &&
-             (!('locationLng' in data) || data.locationLng == null || (data.locationLng is number && data.locationLng >= -180 && data.locationLng <= 180)) &&
-             data.tags is list && data.tags.size() <= 10 &&
-             (data.tags.size() == 0 || (data.tags[0] is string && data.tags[0].size() >= 1 && data.tags[0].size() <= 32)) &&
-             data.attachments is list && data.attachments.size() <= 10 &&
-             (data.attachments.size() == 0 || data.attachments[0] is map) &&
-             data.bookmarked is bool &&
-             data.wordCount is int && data.wordCount >= 0 && data.wordCount <= 50000 &&
-             data.createdAt is timestamp && data.createdAt <= request.time &&
-             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    function isValidRepeatRule(val) {
+      return val in ['NONE', 'DAILY', 'WEEKDAYS', 'WEEKLY', 'MONTHLY'];
     }
 
-    match /users/{userId}/entries/{entryId} {
-      allow get: if isOwner(userId) && isValidId(userId) && isValidId(entryId);
+    function isValidSubtaskEntry(entry) {
+      return entry is map &&
+        entry.keys().hasAll(['id', 'title', 'done']) &&
+        entry.keys().hasOnly(['id', 'title', 'done']) &&
+        entry.id is string && entry.id.size() >= 1 && entry.id.size() <= 64 &&
+        entry.title is string && entry.title.size() >= 1 && entry.title.size() <= 120 &&
+        entry.done is bool;
+    }
+
+    function isValidTask(data, ownerId) {
+      return data.keys().hasAll([
+          'userId', 'title', 'notes', 'completed', 'colorKey',
+          'repeatRule', 'repeatInterval', 'subtasks', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'userId', 'title', 'notes', 'completed', 'colorKey',
+          'dueDateMillis', 'reminderMillis', 'repeatRule', 'repeatInterval',
+          'subtasks', 'createdAt', 'updatedAt'
+        ]) &&
+        data.userId is string && data.userId == ownerId && data.userId == request.auth.uid &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+        data.notes is string && data.notes.size() <= 500 &&
+        data.completed is bool &&
+        data.colorKey is string && data.colorKey.size() <= 16 && isValidColorKey(data.colorKey) &&
+        (!('dueDateMillis' in data) || data.dueDateMillis == null || (data.dueDateMillis is int && data.dueDateMillis > 0)) &&
+        (!('reminderMillis' in data) || data.reminderMillis == null || (data.reminderMillis is int && data.reminderMillis > 0)) &&
+        data.repeatRule is string && data.repeatRule.size() <= 16 && isValidRepeatRule(data.repeatRule) &&
+        data.repeatInterval is int && data.repeatInterval >= 1 && data.repeatInterval <= 365 &&
+        data.subtasks is list && data.subtasks.size() <= 30 &&
+        (data.subtasks.size() == 0 || isValidSubtaskEntry(data.subtasks[0])) &&
+        data.createdAt is timestamp && data.createdAt <= request.time &&
+        data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    // Named update actions for strict affectedKeys enforcement
+    function isToggleCompletionAction() {
+      return incoming().diff(existing()).affectedKeys().hasOnly([
+        'completed', 'dueDateMillis', 'reminderMillis', 'subtasks', 'updatedAt'
+      ]);
+    }
+
+    function isUpdateSubtasksAction() {
+      return incoming().diff(existing()).affectedKeys().hasOnly([
+        'subtasks', 'updatedAt'
+      ]);
+    }
+
+    function isEditTaskAction() {
+      return incoming().diff(existing()).affectedKeys().hasOnly([
+        'title', 'notes', 'completed', 'colorKey',
+        'dueDateMillis', 'reminderMillis', 'repeatRule', 'repeatInterval',
+        'subtasks', 'updatedAt'
+      ]);
+    }
+
+    // --- USER-SCOPED TASKS SUBCOLLECTION ---
+    match /users/{userId}/tasks/{taskId} {
+      allow get: if isOwner(userId) && isValidId(userId) && isValidId(taskId);
+
+      // User-scoped subcollection list relies strictly on path wildcard ownership
       allow list: if isOwner(userId) && isValidId(userId);
 
       allow create: if isOwner(userId) &&
-                       isValidId(userId) &&
-                       isValidId(entryId) &&
-                       incoming().userId == userId &&
-                       incoming().keys().hasAll([
-                         'userId', 'heading', 'body', 'entryDateMillis', 'category',
-                         'locationName', 'tags', 'attachments', 'bookmarked',
-                         'wordCount', 'createdAt', 'updatedAt'
-                       ]) &&
-                       incoming().keys().hasOnly([
-                         'userId', 'heading', 'body', 'entryDateMillis', 'category',
-                         'locationName', 'locationLat', 'locationLng', 'tags',
-                         'attachments', 'bookmarked', 'wordCount', 'createdAt', 'updatedAt'
-                       ]) &&
-                       isValidJournalEntry(incoming());
+        isValidId(userId) &&
+        isValidId(taskId) &&
+        isValidTask(incoming(), userId);
 
       allow update: if isOwner(userId) &&
-                       isValidId(userId) &&
-                       isValidId(entryId) &&
-                       isValidJournalEntry(incoming()) &&
-                       incoming().userId == existing().userId &&
-                       incoming().createdAt == existing().createdAt &&
-                       (
-                         // Action 1: Toggle bookmark status
-                         incoming().diff(existing()).affectedKeys().hasOnly(['bookmarked', 'updatedAt']) ||
-                         // Action 2: Full or partial entry edit
-                         incoming().diff(existing()).affectedKeys().hasOnly([
-                           'heading', 'body', 'entryDateMillis', 'category',
-                           'locationName', 'locationLat', 'locationLng',
-                           'tags', 'attachments', 'bookmarked', 'wordCount', 'updatedAt'
-                         ])
-                       );
+        isValidId(userId) &&
+        isValidId(taskId) &&
+        isValidTask(incoming(), userId) &&
+        incoming().userId == existing().userId &&
+        incoming().createdAt == existing().createdAt &&
+        (
+          isToggleCompletionAction() ||
+          isUpdateSubtasksAction() ||
+          isEditTaskAction()
+        );
 
-      allow delete: if isOwner(userId) && isValidId(userId) && isValidId(entryId);
+      allow delete: if isOwner(userId) && isValidId(userId) && isValidId(taskId);
     }
   }
 }
