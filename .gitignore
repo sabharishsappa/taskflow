@@ -22,3 +22,6 @@ debug.keystore
 app/google-services.json
 *.jks
 *.keystore
+
+# AI Studio reference images (personal screenshots, not used by the app)
+public/
