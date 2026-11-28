@@ -8,8 +8,8 @@ const fs = require("node:fs");
 
 let testEnv;
 const PROJECT_ID = process.env.GCP_PROJECT || "demo-no-project";
-const ALICE_UID = "alice_123";
-const BOB_UID = "bob_456";
+const ALICE_UID = "alice_journal_123";
+const BOB_UID = "bob_journal_456";
 
 const [emulatorHost, emulatorPortStr] = (
   process.env.FIRESTORE_EMULATOR_HOST || "127.0.0.1:8085"
@@ -17,17 +17,31 @@ const [emulatorHost, emulatorPortStr] = (
 const emulatorPort = parseInt(emulatorPortStr, 10);
 
 function validEntryPayload(uid, overrides = {}) {
-  const past = new Date(Date.now() - 5000);
+  const now = new Date(Date.now() - 2000);
   return {
     userId: uid,
-    title: "Morning Walk by the River",
-    content: "The air felt crisp and quiet after last night's rain.",
-    mood: "CALM",
-    favorite: false,
-    tags: ["morning", "nature"],
-    wordCount: 10,
-    createdAt: past,
-    updatedAt: past,
+    heading: "Morning Trail Run at Marin Headlands",
+    body: "Started early while the fog was lifting over the Golden Gate. Crisp air and quiet trails.",
+    entryDateMillis: Date.now() - 3600 * 1000,
+    category: "ACTIVITY",
+    locationName: "Marin Headlands, CA",
+    locationLat: 37.827,
+    locationLng: -122.4994,
+    tags: ["fitness", "outdoors", "morning"],
+    attachments: [
+      {
+        id: "att-1",
+        name: "trail_sunrise.jpg",
+        mimeType: "image/jpeg",
+        localPath: "/data/user/0/com.aistudio.foliojournal.qrwmzt/files/journal_attachments/att-1.jpg",
+        kind: "IMAGE",
+        sizeBytes: 245012,
+      },
+    ],
+    bookmarked: false,
+    wordCount: 22,
+    createdAt: now,
+    updatedAt: now,
     ...overrides,
   };
 }
@@ -56,7 +70,7 @@ beforeEach(async () => {
   }
 });
 
-test("Unauthenticated user cannot read or write journal entries", async () => {
+test("Unauthenticated user: denied all reads and writes", async () => {
   const unauthDb = testEnv.unauthenticatedContext().firestore();
   await assertFails(
     unauthDb.collection("users").doc(ALICE_UID).collection("entries").get()
@@ -71,173 +85,160 @@ test("Unauthenticated user cannot read or write journal entries", async () => {
   );
 });
 
-test("Authenticated owner can create, list, orderBy createdAt, update, toggle favorite, and delete", async () => {
+test("Authenticated owner: valid Kotlin create, list, get, partial update, bookmark toggle, and delete succeed", async () => {
   const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
-  const entriesRef = aliceDb
-    .collection("users")
-    .doc(ALICE_UID)
-    .collection("entries");
+  const entriesCol = aliceDb.collection("users").doc(ALICE_UID).collection("entries");
+  const entryRef = entriesCol.doc("entry_1");
 
-  // Empty subcollection list query (mirrors Kotlin observeEntries)
-  await assertSucceeds(entriesRef.orderBy("createdAt", "desc").get());
+  // Create with optional coordinates included
+  await assertSucceeds(entryRef.set(validEntryPayload(ALICE_UID)));
 
-  // Create valid entry mirroring Kotlin JournalRepository.createEntry()
+  // Create without optional coordinates (omitted via filterValues { it != null })
+  const payloadNoCoords = validEntryPayload(ALICE_UID, {
+    heading: "Quiet Evening Reading",
+    locationName: "",
+    tags: [],
+    attachments: [],
+  });
+  delete payloadNoCoords.locationLat;
+  delete payloadNoCoords.locationLng;
+  await assertSucceeds(entriesCol.doc("entry_2").set(payloadNoCoords));
+
+  // List query matching Kotlin repository: orderBy("entryDateMillis", DESCENDING)
+  await assertSucceeds(entriesCol.orderBy("entryDateMillis", "desc").get());
+  await assertSucceeds(entryRef.get());
+
+  // Action 1: Bookmark toggle partial update
   await assertSucceeds(
-    entriesRef.doc("entry_1").set(validEntryPayload(ALICE_UID))
-  );
-
-  // Get single entry
-  await assertSucceeds(entriesRef.doc("entry_1").get());
-
-  // List populated entries ordered by createdAt desc
-  await assertSucceeds(entriesRef.orderBy("createdAt", "desc").get());
-
-  // Partial update: toggle favorite (mirrors JournalRepository.toggleFavorite)
-  await assertSucceeds(
-    entriesRef.doc("entry_1").update({
-      favorite: true,
+    entryRef.update({
+      bookmarked: true,
       updatedAt: new Date(Date.now() - 1000),
     })
   );
 
-  // Partial update: full edit (mirrors JournalRepository.updateEntry)
+  // Action 2: Full edit partial update (preserving createdAt & userId)
   await assertSucceeds(
-    entriesRef.doc("entry_1").update({
-      title: "Updated Morning Walk",
-      content: "Noticed the mist rising over the trees.",
-      mood: "GRATEFUL",
-      favorite: true,
-      tags: ["gratitude"],
-      wordCount: 7,
+    entryRef.update({
+      heading: "Updated Trail Run Heading",
+      body: "Added extra notes after stretching.",
+      entryDateMillis: Date.now() - 7200 * 1000,
+      category: "EVENT",
+      locationName: "Sausalito, CA",
+      locationLat: 37.8591,
+      locationLng: -122.4853,
+      tags: ["fitness", "weekend"],
+      attachments: [],
+      bookmarked: true,
+      wordCount: 10,
       updatedAt: new Date(Date.now() - 500),
     })
   );
 
   // Delete own entry
-  await assertSucceeds(entriesRef.doc("entry_1").delete());
+  await assertSucceeds(entryRef.delete());
 });
 
-test("Cross-user isolation blocks Bob from reading, writing, updating, or deleting Alice's entries", async () => {
+test("Cross-user isolation: Bob cannot read, list, create, update, or delete Alice's entries", async () => {
   await testEnv.withSecurityRulesDisabled(async (context) => {
     await context
       .firestore()
       .collection("users")
       .doc(ALICE_UID)
       .collection("entries")
-      .doc("entry_alice")
+      .doc("alice_entry")
       .set(validEntryPayload(ALICE_UID));
   });
 
   const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
-  const aliceEntries = bobDb
-    .collection("users")
-    .doc(ALICE_UID)
-    .collection("entries");
+  const aliceEntries = bobDb.collection("users").doc(ALICE_UID).collection("entries");
 
   await assertFails(aliceEntries.get());
-  await assertFails(aliceEntries.doc("entry_alice").get());
+  await assertFails(aliceEntries.orderBy("entryDateMillis", "desc").get());
+  await assertFails(aliceEntries.doc("alice_entry").get());
   await assertFails(
-    aliceEntries.doc("entry_bob_injected").set(validEntryPayload(BOB_UID))
+    aliceEntries.doc("bob_inject").set(validEntryPayload(BOB_UID))
   );
   await assertFails(
-    aliceEntries.doc("entry_alice").update({
-      favorite: true,
+    aliceEntries.doc("alice_entry").update({
+      heading: "Hijacked",
       updatedAt: new Date(Date.now() - 1000),
     })
   );
-  await assertFails(aliceEntries.doc("entry_alice").delete());
+  await assertFails(aliceEntries.doc("alice_entry").delete());
 });
 
-test("Schema validation rejects ghost fields, @DocumentId 'id', invalid mood, future timestamp, oversized title, and immutable createdAt edits", async () => {
+test("Red Team validation: rejects ghost fields, @DocumentId 'id', future timestamps, invalid category, oversized strings, and immutable mutations", async () => {
   const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
-  const entriesRef = aliceDb
-    .collection("users")
-    .doc(ALICE_UID)
-    .collection("entries");
+  const entriesCol = aliceDb.collection("users").doc(ALICE_UID).collection("entries");
 
-  // Reject ghost field (Shadow Update / Create test)
+  // Shadow/ghost field injection
   await assertFails(
-    entriesRef
-      .doc("entry_ghost")
+    entriesCol
+      .doc("ghost_entry")
       .set(validEntryPayload(ALICE_UID, { isAdmin: true }))
   );
 
-  // Reject @DocumentId 'id' inside document body
+  // Writing @DocumentId 'id' inside document map must fail
   await assertFails(
-    entriesRef
-      .doc("entry_with_id")
-      .set(validEntryPayload(ALICE_UID, { id: "entry_with_id" }))
+    entriesCol
+      .doc("id_field_entry")
+      .set(validEntryPayload(ALICE_UID, { id: "id_field_entry" }))
   );
 
-  // Reject invalid mood enum
+  // Future timestamp tampering must fail
   await assertFails(
-    entriesRef
-      .doc("entry_bad_mood")
-      .set(validEntryPayload(ALICE_UID, { mood: "calm" }))
-  );
-
-  // Reject future timestamp
-  await assertFails(
-    entriesRef
-      .doc("entry_future")
-      .set(
-        validEntryPayload(ALICE_UID, {
-          createdAt: new Date(Date.now() + 60000),
-          updatedAt: new Date(Date.now() + 60000),
-        })
-      )
-  );
-
-  // Reject empty or oversized title
-  await assertFails(
-    entriesRef.doc("entry_empty_title").set(validEntryPayload(ALICE_UID, { title: "" }))
-  );
-  await assertFails(
-    entriesRef
-      .doc("entry_long_title")
-      .set(validEntryPayload(ALICE_UID, { title: "a".repeat(161) }))
-  );
-
-  // Reject too many tags (> 8)
-  await assertFails(
-    entriesRef.doc("entry_many_tags").set(
+    entriesCol.doc("future_ts").set(
       validEntryPayload(ALICE_UID, {
-        tags: ["1", "2", "3", "4", "5", "6", "7", "8", "9"],
+        createdAt: new Date(Date.now() + 60000),
+        updatedAt: new Date(Date.now() + 60000),
       })
     )
   );
 
-  // Reject spoofed userId
+  // Invalid category enum must fail
   await assertFails(
-    entriesRef
-      .doc("entry_spoof")
+    entriesCol
+      .doc("bad_cat")
+      .set(validEntryPayload(ALICE_UID, { category: "UNKNOWN_TYPE" }))
+  );
+
+  // Empty heading must fail
+  await assertFails(
+    entriesCol
+      .doc("empty_heading")
+      .set(validEntryPayload(ALICE_UID, { heading: "" }))
+  );
+
+  // Too many tags (> 10) must fail
+  await assertFails(
+    entriesCol.doc("too_many_tags").set(
+      validEntryPayload(ALICE_UID, {
+        tags: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"],
+      })
+    )
+  );
+
+  // Spoofed userId inside own subcollection must fail
+  await assertFails(
+    entriesCol
+      .doc("spoof_uid")
       .set(validEntryPayload(ALICE_UID, { userId: BOB_UID }))
   );
 
-  // Create valid doc, then test update immutability & value poisoning
-  await assertSucceeds(
-    entriesRef.doc("entry_valid").set(validEntryPayload(ALICE_UID))
-  );
-
-  // Reject mutating immutable createdAt
+  // Immutable createdAt mutation on update must fail
+  await assertSucceeds(entriesCol.doc("immut_entry").set(validEntryPayload(ALICE_UID)));
   await assertFails(
-    entriesRef.doc("entry_valid").update({
-      createdAt: new Date(Date.now() - 1000),
-      updatedAt: new Date(Date.now() - 1000),
+    entriesCol.doc("immut_entry").update({
+      createdAt: new Date(Date.now() - 100),
+      updatedAt: new Date(Date.now() - 100),
     })
   );
 
-  // Reject value poisoning on allowlisted key
-  await assertSucceeds(
-    entriesRef.doc("entry_valid").update({
-      favorite: true,
-      updatedAt: new Date(Date.now() - 1000),
-    })
-  );
+  // Value poisoning on update (oversized heading > 200 chars) must fail
   await assertFails(
-    entriesRef.doc("entry_valid").update({
-      favorite: "not_a_boolean",
-      updatedAt: new Date(Date.now() - 500),
+    entriesCol.doc("immut_entry").update({
+      heading: "A".repeat(205),
+      updatedAt: new Date(Date.now() - 100),
     })
   );
 });

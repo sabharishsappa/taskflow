@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Daybook"
+rootProject.name = "Folio Journal"
 
 include(":app")

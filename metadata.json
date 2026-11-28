@@ -1,6 +1,6 @@
 {
-  "name": "Daybook",
-  "description": "A calm, private personal journal for daily reflections, moods, and moments stored locally on your device.",
+  "name": "Folio Journal",
+  "description": "An editorial personal journal app for capturing daily moments, activities, and events with dates, headings, rich stories, photo and file attachments, locations, and custom tags.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

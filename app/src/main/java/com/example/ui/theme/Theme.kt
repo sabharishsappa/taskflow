@@ -7,94 +7,92 @@ import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
-private val DaybookLightColorScheme = lightColorScheme(
-    primary = ForestSage,
-    onPrimary = OnForestSage,
-    primaryContainer = ForestSageContainer,
-    onPrimaryContainer = OnForestSageContainer,
-    secondary = Terracotta,
-    onSecondary = OnTerracotta,
-    secondaryContainer = TerracottaContainer,
-    onSecondaryContainer = OnTerracottaContainer,
-    tertiary = AntiquedBrass,
-    onTertiary = OnAntiquedBrass,
-    tertiaryContainer = AntiquedBrassContainer,
-    onTertiaryContainer = OnAntiquedBrassContainer,
-    background = WarmParchment,
-    onBackground = WarmInk,
-    surface = WarmParchment,
-    onSurface = WarmInk,
-    surfaceVariant = LinenCard,
-    onSurfaceVariant = MutedStone,
-    surfaceContainerLowest = OnForestSage,
-    surfaceContainerLow = LinenCard,
-    surfaceContainer = LinenContainer,
-    surfaceContainerHigh = LinenContainerHigh,
-    outline = ParchmentOutline,
-    outlineVariant = ParchmentOutlineVariant,
-    error = CrimsonInk,
-    onError = OnCrimsonInk,
-    errorContainer = CrimsonContainer,
-    onErrorContainer = OnCrimsonContainer
+private val JournalDarkColorScheme = darkColorScheme(
+    primary = JournalPeriwinkleDark,
+    onPrimary = JournalPeriwinkleOnDark,
+    primaryContainer = JournalIndigoContainerDark,
+    onPrimaryContainer = JournalLavenderOnContainerDark,
+    secondary = JournalPlumDark,
+    onSecondary = Color(0xFF211147),
+    secondaryContainer = JournalPlumContainerDark,
+    onSecondaryContainer = JournalPlumOnContainerDark,
+    tertiary = JournalAmberDark,
+    onTertiary = Color(0xFF3E2200),
+    tertiaryContainer = JournalAmberContainerDark,
+    onTertiaryContainer = JournalAmberOnContainerDark,
+    background = CanvasObsidianDark,
+    onBackground = InkPrimaryDark,
+    surface = CanvasObsidianDark,
+    onSurface = InkPrimaryDark,
+    surfaceVariant = SurfaceElevatedDark,
+    onSurfaceVariant = InkSecondaryDark,
+    surfaceContainerLowest = Color(0xFF13131A),
+    surfaceContainerLow = SurfaceCardDark,
+    surfaceContainer = SurfaceCardDark,
+    surfaceContainerHigh = SurfaceElevatedDark,
+    surfaceContainerHighest = SurfacePillDark,
+    outline = HairlineDark,
+    outlineVariant = Color(0xFF252533),
+    error = ErrorCoralDark,
+    onError = Color(0xFF3B0B0B),
+    errorContainer = ErrorContainerDark,
+    onErrorContainer = Color(0xFFFECACA),
 )
 
-private val ColorErrorDark = androidx.compose.ui.graphics.Color(0xFFF2B8B5)
-private val ColorOnErrorDark = androidx.compose.ui.graphics.Color(0xFF601410)
-private val ColorErrorContainerDark = androidx.compose.ui.graphics.Color(0xFF8C1D18)
-private val ColorOnErrorContainerDark = androidx.compose.ui.graphics.Color(0xFFF9DEDC)
-
-private val DaybookDarkColorScheme = darkColorScheme(
-    primary = SageMist,
-    onPrimary = OnSageMist,
-    primaryContainer = DeepSageContainer,
-    onPrimaryContainer = OnDeepSageContainer,
-    secondary = WarmClay,
-    onSecondary = OnWarmClay,
-    secondaryContainer = DeepClayContainer,
-    onSecondaryContainer = OnDeepClayContainer,
-    tertiary = SoftGold,
-    onTertiary = OnSoftGold,
-    tertiaryContainer = DeepGoldContainer,
-    onTertiaryContainer = OnDeepGoldContainer,
-    background = EspressoCanvas,
-    onBackground = WarmCreamText,
-    surface = EspressoCanvas,
-    onSurface = WarmCreamText,
-    surfaceVariant = EspressoSurfaceLow,
-    onSurfaceVariant = MutedSandText,
-    surfaceContainerLowest = EspressoCanvas,
-    surfaceContainerLow = EspressoSurfaceLow,
-    surfaceContainer = EspressoSurface,
-    surfaceContainerHigh = EspressoSurfaceHigh,
-    outline = EspressoOutline,
-    outlineVariant = EspressoOutlineVariant,
-    error = ColorErrorDark,
-    onError = ColorOnErrorDark,
-    errorContainer = ColorErrorContainerDark,
-    onErrorContainer = ColorOnErrorContainerDark
+private val JournalLightColorScheme = lightColorScheme(
+    primary = JournalIndigo,
+    onPrimary = Color.White,
+    primaryContainer = JournalLavenderSoft,
+    onPrimaryContainer = JournalLavenderInk,
+    secondary = JournalPlum,
+    onSecondary = Color.White,
+    secondaryContainer = JournalPlumContainer,
+    onSecondaryContainer = JournalPlumInk,
+    tertiary = JournalAmber,
+    onTertiary = Color.White,
+    tertiaryContainer = JournalAmberContainer,
+    onTertiaryContainer = JournalAmberInk,
+    background = CanvasWarmLight,
+    onBackground = InkPrimaryLight,
+    surface = CanvasWarmLight,
+    onSurface = InkPrimaryLight,
+    surfaceVariant = SurfaceMutedLight,
+    onSurfaceVariant = InkSecondaryLight,
+    surfaceContainerLowest = SurfaceCardLight,
+    surfaceContainerLow = Color(0xFFFDFCFA),
+    surfaceContainer = SurfaceCardLight,
+    surfaceContainerHigh = SurfaceMutedLight,
+    surfaceContainerHighest = SurfacePillLight,
+    outline = Color(0xFFD6D3CB),
+    outlineVariant = HairlineLight,
+    error = ErrorCrimsonLight,
+    onError = Color.White,
+    errorContainer = ErrorContainerLight,
+    onErrorContainer = Color(0xFF7F1D1D),
 )
 
-val DaybookShapes = Shapes(
-    extraSmall = RoundedCornerShape(6.dp),
-    small = RoundedCornerShape(10.dp),
-    medium = RoundedCornerShape(16.dp),
+val JournalShapes = Shapes(
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(18.dp),
     large = RoundedCornerShape(24.dp),
-    extraLarge = RoundedCornerShape(32.dp)
+    extraLarge = RoundedCornerShape(30.dp),
 )
 
 @Composable
-fun DaybookTheme(
+fun FolioJournalTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit
 ) {
-    val colorScheme = if (darkTheme) DaybookDarkColorScheme else DaybookLightColorScheme
+    val colorScheme = if (darkTheme) JournalDarkColorScheme else JournalLightColorScheme
 
     MaterialTheme(
         colorScheme = colorScheme,
-        typography = DaybookTypography,
-        shapes = DaybookShapes,
+        typography = Typography,
+        shapes = JournalShapes,
         content = content
     )
 }

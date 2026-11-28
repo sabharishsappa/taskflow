@@ -2,56 +2,79 @@
   "entities": {
     "JournalEntry": {
       "title": "JournalEntry",
-      "description": "A personal journal entry authored by an authenticated user.",
+      "description": "A personal journal entry capturing an activity, event, or daily reflection with date, heading, detailed matter, attachments, location, and tags.",
       "type": "object",
       "properties": {
         "userId": {
           "type": "string",
-          "description": "The authenticated owner's Firebase UID. Immutable after creation."
+          "description": "Authenticated Firebase Auth UID of the owner."
         },
-        "title": {
+        "heading": {
           "type": "string",
-          "description": "Entry title (1 to 160 characters)."
+          "description": "Title or heading of the journal entry or event (1-200 chars)."
         },
-        "content": {
+        "body": {
           "type": "string",
-          "description": "Full journal reflection text (1 to 20000 characters)."
+          "description": "Detailed matter or full written reflection (0-20000 chars)."
         },
-        "mood": {
+        "entryDateMillis": {
+          "type": "integer",
+          "description": "Epoch timestamp in milliseconds for the user-selected date of the activity or event."
+        },
+        "category": {
           "type": "string",
-          "enum": ["CALM", "JOYFUL", "GRATEFUL", "REFLECTIVE", "TIRED", "ANXIOUS"],
-          "description": "Selected emotional mood for the entry."
+          "enum": ["REFLECTION", "ACTIVITY", "EVENT", "MILESTONE", "TRAVEL", "IDEA"],
+          "description": "Type of journal moment or event."
         },
-        "favorite": {
-          "type": "boolean",
-          "description": "Whether the entry is bookmarked as a favorite."
+        "locationName": {
+          "type": "string",
+          "description": "Human-readable place or venue name (0-200 chars)."
+        },
+        "locationLat": {
+          "type": "number",
+          "description": "Optional latitude coordinate (-90 to 90), omitted when absent."
+        },
+        "locationLng": {
+          "type": "number",
+          "description": "Optional longitude coordinate (-180 to 180), omitted when absent."
         },
         "tags": {
           "type": "array",
-          "description": "Up to 8 short topical tags."
+          "description": "Bounded list of up to 10 string tags for organizing and filtering entries."
+        },
+        "attachments": {
+          "type": "array",
+          "description": "Bounded list of up to 10 attachment metadata maps (id, name, mimeType, localPath, kind, sizeBytes)."
+        },
+        "bookmarked": {
+          "type": "boolean",
+          "description": "Whether the entry is bookmarked/pinned for quick revisit."
         },
         "wordCount": {
           "type": "integer",
-          "description": "Word count of the journal content (0 to 20000)."
+          "description": "Word count of heading and detailed body for journal insights."
         },
         "createdAt": {
           "type": "string",
           "format": "date-time",
-          "description": "Server timestamp set via FieldValue.serverTimestamp() on creation. Immutable."
+          "description": "Immutable server timestamp set via FieldValue.serverTimestamp() on creation."
         },
         "updatedAt": {
           "type": "string",
           "format": "date-time",
-          "description": "Server timestamp set via FieldValue.serverTimestamp() on creation and updates."
+          "description": "Server timestamp updated via FieldValue.serverTimestamp() on every write."
         }
       },
       "required": [
         "userId",
-        "title",
-        "content",
-        "mood",
-        "favorite",
+        "heading",
+        "body",
+        "entryDateMillis",
+        "category",
+        "locationName",
         "tags",
+        "attachments",
+        "bookmarked",
         "wordCount",
         "createdAt",
         "updatedAt"
@@ -60,8 +83,10 @@
   },
   "firestore": {
     "/users/{userId}/entries/{entryId}": {
-      "schema": { "$ref": "#/entities/JournalEntry" },
-      "description": "Private user-scoped journal entries owned exclusively by {userId}."
+      "schema": {
+        "$ref": "#/entities/JournalEntry"
+      },
+      "description": "User-scoped private collection of personal journal entries."
     }
   }
 }

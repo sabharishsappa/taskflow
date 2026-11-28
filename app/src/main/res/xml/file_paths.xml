@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
-    <files-path
-        name="attachments"
-        path="attachments/" />
+    <files-path name="journal_attachments" path="journal_attachments/" />
+    <files-path name="journal_backups" path="journal_backups/" />
+    <cache-path name="journal_cache" path="." />
 </paths>

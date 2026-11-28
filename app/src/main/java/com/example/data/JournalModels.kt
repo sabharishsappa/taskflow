@@ -1,48 +1,105 @@
 package com.example.data
 
-data class JournalAttachment(
-    val localPath: String,
-    val displayName: String,
-    val mimeType: String,
-    val isImage: Boolean
-)
+object JournalValidation {
+    const val MAX_HEADING_LENGTH = 200
+    const val MAX_BODY_LENGTH = 20000
+    const val MAX_LOCATION_LENGTH = 200
+    const val MAX_TAGS = 10
+    const val MAX_TAG_LENGTH = 32
+    const val MAX_ATTACHMENTS = 10
+    const val MAX_WORDS = 50000
 
-data class EventLocation(
-    val name: String = "",
-    val latitude: Double? = null,
-    val longitude: Double? = null
-) {
-    val hasCoordinates: Boolean
-        get() = latitude != null && longitude != null
-
-    val isPresent: Boolean
-        get() = name.isNotBlank() || hasCoordinates
-
-    fun formattedCoordinates(): String? {
-        val lat = latitude ?: return null
-        val lng = longitude ?: return null
-        return String.format(java.util.Locale.US, "%.5f, %.5f", lat, lng)
+    fun computeWordCount(heading: String, body: String): Long {
+        val combined = "$heading $body".trim()
+        if (combined.isEmpty()) return 0L
+        return combined.split(Regex("\\s+")).count { it.isNotBlank() }.toLong().coerceAtMost(MAX_WORDS.toLong())
     }
+
+    fun sanitizeTag(raw: String): String {
+        return raw.trim()
+            .removePrefix("#")
+            .trim()
+            .replace(Regex("\\s+"), " ")
+            .take(MAX_TAG_LENGTH)
+    }
+}
+
+enum class AttachmentKind(val firestoreValue: String) {
+    IMAGE("IMAGE"),
+    DOCUMENT("DOCUMENT");
+
+    companion object {
+        fun fromRaw(raw: String?): AttachmentKind {
+            return entries.firstOrNull { it.firestoreValue.equals(raw, ignoreCase = true) }
+                ?: DOCUMENT
+        }
+    }
+}
+
+data class JournalAttachment(
+    val id: String = "",
+    val name: String = "",
+    val mimeType: String = "application/octet-stream",
+    val localPath: String = "",
+    val kind: String = AttachmentKind.DOCUMENT.firestoreValue,
+    val sizeBytes: Long = 0L,
+) {
+    fun attachmentKind(): AttachmentKind = AttachmentKind.fromRaw(kind)
 }
 
 data class JournalEntry(
     val id: String = "",
     val heading: String = "",
-    val content: String = "",
-    val eventDateMillis: Long = System.currentTimeMillis(),
-    val favorite: Boolean = false,
+    val body: String = "",
+    val entryDateMillis: Long = System.currentTimeMillis(),
+    val locationName: String = "",
+    val locationLat: Double? = null,
+    val locationLng: Double? = null,
     val tags: List<String> = emptyList(),
     val attachments: List<JournalAttachment> = emptyList(),
-    val location: EventLocation? = null,
+    val bookmarked: Boolean = false,
+    val wordCount: Long = 0L,
     val createdAtMillis: Long = System.currentTimeMillis(),
-    val updatedAtMillis: Long = System.currentTimeMillis()
+    val updatedAtMillis: Long = System.currentTimeMillis(),
+) {
+    fun imageAttachments(): List<JournalAttachment> =
+        attachments.filter { it.attachmentKind() == AttachmentKind.IMAGE }
+
+    fun documentAttachments(): List<JournalAttachment> =
+        attachments.filter { it.attachmentKind() == AttachmentKind.DOCUMENT }
+}
+
+data class JournalStats(
+    val totalEntries: Int = 0,
+    val totalWords: Long = 0L,
+    val daysJournaled: Int = 0,
+    val currentStreakDays: Int = 0,
 )
 
-object JournalConstraints {
-    const val MAX_HEADING_LENGTH = 160
-    const val MAX_CONTENT_LENGTH = 20_000
-    const val MAX_TAGS = 8
-    const val MAX_TAG_LENGTH = 30
-    const val MAX_ATTACHMENTS = 8
-    const val MAX_LOCATION_NAME_LENGTH = 200
-}
+data class ReflectionPrompt(
+    val title: String,
+    val subtitle: String,
+    val defaultHeading: String,
+    val defaultTag: String,
+)
+
+val DefaultReflectionPrompts = listOf(
+    ReflectionPrompt(
+        title = "Highlight of the Day",
+        subtitle = "What moment brought you energy or quiet joy today?",
+        defaultHeading = "Today's Highlight",
+        defaultTag = "Gratitude",
+    ),
+    ReflectionPrompt(
+        title = "Log an Activity",
+        subtitle = "Record a workout, walk, hobby session, or creative project.",
+        defaultHeading = "Afternoon Activity",
+        defaultTag = "Activity",
+    ),
+    ReflectionPrompt(
+        title = "Capture an Event",
+        subtitle = "Remember a gathering, trip, dinner, or special milestone.",
+        defaultHeading = "Memorable Event",
+        defaultTag = "Event",
+    ),
+)

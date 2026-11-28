@@ -2,9 +2,9 @@
 <img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
 </div>
 
-# Daybook
+# Folio Journal
 
-A calm, private Android journal for daily reflections, moods and moments, with tasks and habits. Everything is stored locally on your device.
+An editorial personal journal for Android: capture daily moments with dates, headings, rich stories, photo and file attachments, locations and custom tags.
 
 ## Download
 
@@ -20,7 +20,7 @@ Every push to `main` is built by GitHub Actions. Grab the APK from the [Latest b
 
 This contains everything you need to run your app locally.
 
-View your app in AI Studio: https://ai.studio/apps/c90aec93-3f2c-4fc3-8b0e-df7c7e772892
+View your app in AI Studio: https://ai.studio/apps/7db22476-c026-49b2-a9d1-5b0eaffa9f3d
 
 ## Run Locally
 

@@ -1,4 +1,5 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -28,38 +29,30 @@ service cloud.firestore {
       return resource.data;
     }
 
-    function isValidMood(mood) {
-      return mood is string && mood in ['CALM', 'JOYFUL', 'GRATEFUL', 'REFLECTIVE', 'TIRED', 'ANXIOUS'];
+    function isValidCategory(cat) {
+      return cat in ['REFLECTION', 'ACTIVITY', 'EVENT', 'MILESTONE', 'TRAVEL', 'IDEA'];
     }
 
-    function isValidTags(tags) {
-      return tags is list &&
-             tags.size() <= 8 &&
-             (tags.size() == 0 || (tags[0] is string && tags[0].size() >= 1 && tags[0].size() <= 30));
-    }
-
-    // Standalone validation blueprint for JournalEntry
-    function isValidJournalEntry(data, userId) {
-      return data.keys().hasAll([
-               'userId', 'title', 'content', 'mood', 'favorite',
-               'tags', 'wordCount', 'createdAt', 'updatedAt'
-             ]) &&
-             data.keys().hasOnly([
-               'userId', 'title', 'content', 'mood', 'favorite',
-               'tags', 'wordCount', 'createdAt', 'updatedAt'
-             ]) &&
-             data.userId is string && data.userId == userId && data.userId == request.auth.uid && data.userId.size() <= 128 &&
-             data.title is string && data.title.size() >= 1 && data.title.size() <= 160 &&
-             data.content is string && data.content.size() >= 1 && data.content.size() <= 20000 &&
-             isValidMood(data.mood) &&
-             data.favorite is bool &&
-             isValidTags(data.tags) &&
-             data.wordCount is int && data.wordCount >= 0 && data.wordCount <= 20000 &&
+    function isValidJournalEntry(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.userId == request.auth.uid &&
+             data.heading is string && data.heading.size() >= 1 && data.heading.size() <= 200 &&
+             data.body is string && data.body.size() <= 20000 &&
+             data.entryDateMillis is int && data.entryDateMillis > 0 &&
+             data.category is string && data.category.size() <= 32 && isValidCategory(data.category) &&
+             data.locationName is string && data.locationName.size() <= 200 &&
+             (!('locationLat' in data) || data.locationLat == null || (data.locationLat is number && data.locationLat >= -90 && data.locationLat <= 90)) &&
+             (!('locationLng' in data) || data.locationLng == null || (data.locationLng is number && data.locationLng >= -180 && data.locationLng <= 180)) &&
+             data.tags is list && data.tags.size() <= 10 &&
+             (data.tags.size() == 0 || (data.tags[0] is string && data.tags[0].size() >= 1 && data.tags[0].size() <= 32)) &&
+             data.attachments is list && data.attachments.size() <= 10 &&
+             (data.attachments.size() == 0 || data.attachments[0] is map) &&
+             data.bookmarked is bool &&
+             data.wordCount is int && data.wordCount >= 0 && data.wordCount <= 50000 &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
 
-    // Private user-scoped journal entries
     match /users/{userId}/entries/{entryId} {
       allow get: if isOwner(userId) && isValidId(userId) && isValidId(entryId);
       allow list: if isOwner(userId) && isValidId(userId);
@@ -67,22 +60,33 @@ service cloud.firestore {
       allow create: if isOwner(userId) &&
                        isValidId(userId) &&
                        isValidId(entryId) &&
-                       isValidJournalEntry(incoming(), userId);
+                       incoming().userId == userId &&
+                       incoming().keys().hasAll([
+                         'userId', 'heading', 'body', 'entryDateMillis', 'category',
+                         'locationName', 'tags', 'attachments', 'bookmarked',
+                         'wordCount', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'heading', 'body', 'entryDateMillis', 'category',
+                         'locationName', 'locationLat', 'locationLng', 'tags',
+                         'attachments', 'bookmarked', 'wordCount', 'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidJournalEntry(incoming());
 
       allow update: if isOwner(userId) &&
                        isValidId(userId) &&
                        isValidId(entryId) &&
-                       isValidJournalEntry(incoming(), userId) &&
+                       isValidJournalEntry(incoming()) &&
                        incoming().userId == existing().userId &&
                        incoming().createdAt == existing().createdAt &&
                        (
-                         // Action: Edit full journal entry content/metadata
+                         // Action 1: Toggle bookmark status
+                         incoming().diff(existing()).affectedKeys().hasOnly(['bookmarked', 'updatedAt']) ||
+                         // Action 2: Full or partial entry edit
                          incoming().diff(existing()).affectedKeys().hasOnly([
-                           'title', 'content', 'mood', 'favorite', 'tags', 'wordCount', 'updatedAt'
-                         ]) ||
-                         // Action: Toggle favorite bookmark
-                         incoming().diff(existing()).affectedKeys().hasOnly([
-                           'favorite', 'updatedAt'
+                           'heading', 'body', 'entryDateMillis', 'category',
+                           'locationName', 'locationLat', 'locationLng',
+                           'tags', 'attachments', 'bookmarked', 'wordCount', 'updatedAt'
                          ])
                        );
 
